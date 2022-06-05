@@ -75,6 +75,7 @@ impl InnerProductProof {
         // If it's the first iteration, unroll the Hprime = H*y_inv scalar mults
         // into multiscalar muls, for performance.
         if n != 1 {
+            // Split a, b, g, h into two halves and compute inner products for cross terms
             n = n / 2;
             let (a_L, a_R) = a.split_at_mut(n);
             let (b_L, b_R) = b.split_at_mut(n);
@@ -83,7 +84,11 @@ impl InnerProductProof {
 
             let c_L = inner_product(&a_L, &b_R);
             let c_R = inner_product(&a_R, &b_L);
+            
 
+            // some elliptic curve stuff? looks like computing L and R from paper:
+            // L takes g terms from n (midpoint) to 2n, whereas R takes first half 
+            // QUESTION: need to figure out how/what the a_L_i are / how they are treated (don't see them defined anywhere)
             let L = RistrettoPoint::vartime_multiscalar_mul(
                 a_L.iter()
                     .zip(G_factors[n..2 * n].into_iter())
@@ -111,16 +116,20 @@ impl InnerProductProof {
                 G_L.iter().chain(H_R.iter()).chain(iter::once(Q)),
             )
             .compress();
-
+            
+            // add L and R to L_vec, R_vec (which seem to be vecs of all L/R terms generated across whole proof)
             L_vec.push(L);
             R_vec.push(R);
 
+            // add (references to) L, R to transcript
             transcript.append_point(b"L", &L);
             transcript.append_point(b"R", &R);
 
+            // add challenge to transcript
             let u = transcript.challenge_scalar(b"u");
             let u_inv = u.invert();
 
+            // compute a', b', g', h', stored in a_L, b_L, G_L, and H_L, respectively
             for i in 0..n {
                 a_L[i] = a_L[i] * u + u_inv * a_R[i];
                 b_L[i] = b_L[i] * u_inv + u * b_R[i];
@@ -133,23 +142,30 @@ impl InnerProductProof {
                     &[H_L[i], H_R[i]],
                 )
             }
-
+            // update a, b, G, H to correct values for next iteration
             a = a_L;
             b = b_L;
             G = G_L;
             H = H_L;
         }
 
+        // all subsequent iterations besides first happen here (first happens above) 
+        // (unless first is n=1, in which case both above and below blocks skipped)
         while n != 1 {
+            // same as before; split the vectors into halves
             n = n / 2;
             let (a_L, a_R) = a.split_at_mut(n);
             let (b_L, b_R) = b.split_at_mut(n);
             let (G_L, G_R) = G.split_at_mut(n);
             let (H_L, H_R) = H.split_at_mut(n);
 
+            // compute cross term inner products
             let c_L = inner_product(&a_L, &b_R);
             let c_R = inner_product(&a_R, &b_L);
 
+            // compute L and R, more simply than before... no need for whatever performance
+            // enhancements they used for first iteration?
+            // QUESTION: figure out RistrettoPoint syntax? looks disgusting lol
             let L = RistrettoPoint::vartime_multiscalar_mul(
                 a_L.iter().chain(b_R.iter()).chain(iter::once(&c_L)),
                 G_R.iter().chain(H_L.iter()).chain(iter::once(Q)),
@@ -162,15 +178,18 @@ impl InnerProductProof {
             )
             .compress();
 
+            // add L, R to appropriate records, and then to transcript
             L_vec.push(L);
             R_vec.push(R);
 
             transcript.append_point(b"L", &L);
             transcript.append_point(b"R", &R);
 
+            // get challenge and add to transcript
             let u = transcript.challenge_scalar(b"u");
             let u_inv = u.invert();
 
+            // compute a', b', G', H', storing in _L vectors
             for i in 0..n {
                 a_L[i] = a_L[i] * u + u_inv * a_R[i];
                 b_L[i] = b_L[i] * u_inv + u * b_R[i];
@@ -178,12 +197,15 @@ impl InnerProductProof {
                 H_L[i] = RistrettoPoint::vartime_multiscalar_mul(&[u, u_inv], &[H_L[i], H_R[i]]);
             }
 
+            // update for recursion
             a = a_L;
             b = b_L;
             G = G_L;
             H = H_L;
         }
 
+        // declaration of struct for proof
+        // note proof keeps its own record of L and R terms from each iteration, separate from transcript
         InnerProductProof {
             L_vec: L_vec,
             R_vec: R_vec,
@@ -195,6 +217,10 @@ impl InnerProductProof {
     /// Computes three vectors of verification scalars \\([u\_{i}^{2}]\\), \\([u\_{i}^{-2}]\\) and \\([s\_{i}]\\) for combined multiscalar multiplication
     /// in a parent protocol. See [inner product protocol notes](index.html#verification-equation) for details.
     /// The verifier must provide the input length \\(n\\) explicitly to avoid unbounded allocation within the inner product proof.
+    /// 
+    /// added note from Aram: the linked page above is actually useful: https://doc-internal.dalek.rs/bulletproofs/inner_product_proof/index.html
+    /// note everything is written additively here, so products become sums and exponentiations become products
+    /// this verification equation matches the equation at the top of page 17 in the paper; s is the same as in the paper, but the u terms here are x terms in the paper
     pub(crate) fn verification_scalars(
         &self,
         n: usize,
