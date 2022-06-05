@@ -1,6 +1,5 @@
 #![allow(non_snake_case)]
-#![doc(include = "../docs/inner-product-protocol.md")]
-
+#![cfg_attr(feature = "docs", doc(include = "../docs/inner-product-protocol.md"))]
 extern crate alloc;
 
 use alloc::borrow::Borrow;
@@ -221,6 +220,8 @@ impl InnerProductProof {
     /// added note from Aram: the linked page above is actually useful: https://doc-internal.dalek.rs/bulletproofs/inner_product_proof/index.html
     /// note everything is written additively here, so products become sums and exponentiations become products
     /// this verification equation matches the equation at the top of page 17 in the paper; s is the same as in the paper, but the u terms here are x terms in the paper
+    /// 
+    /// this method doesn't look like  it actually does any verification; it just returns the scalars needed for the verifier to do the verificatoin themselves
     pub(crate) fn verification_scalars(
         &self,
         n: usize,
@@ -239,6 +240,8 @@ impl InnerProductProof {
         transcript.innerproduct_domain_sep(n as u64);
 
         // 1. Recompute x_k,...,x_1 based on the proof transcript
+        // idk it looks like their notation is inconsistent, here they talk about x but I think they mean what they're calling u... 
+        // maybe got confused with the paper's notation ??
 
         let mut challenges = Vec::with_capacity(lg_n);
         for (L, R) in self.L_vec.iter().zip(self.R_vec.iter()) {
@@ -268,7 +271,7 @@ impl InnerProductProof {
         s.push(allinv);
         for i in 1..n {
             let lg_i = (32 - 1 - (i as u32).leading_zeros()) as usize;
-            let k = 1 << lg_i;
+            let k = 1 << lg_i; // bitwise shift for exp
             // The challenges are stored in "creation order" as [u_k,...,u_1],
             // so u_{lg(i)+1} = is indexed by (lg_n-1) - lg_i
             let u_lg_i_sq = challenges_sq[(lg_n - 1) - lg_i];
