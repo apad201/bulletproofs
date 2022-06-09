@@ -36,16 +36,14 @@ impl MatrixFoldingProof {
     /// either 0 or a power of 2.
     pub fn create(
         transcript: &mut Transcript,
-        G_factors: &[Scalar],
-        H_factors: &[Scalar],
         mut G_vec: Vec<RistrettoPoint>, // say these are stored in row-major
         mut H_vec: Vec<RistrettoPoint>,
         mut U_vec: Vec<RistrettoPoint>, // this used to be Q and was not a vector nor mutable
         mut a_vec: Vec<Scalar>,
         mut b_vec: Vec<Scalar>,
-        n: u32,
-        m: u32,
-        k: u32
+        mut n: u32, //not sure if these need to be mutable but I'm assuming yes
+        mut m: u32,
+        mut k: u32
     ) -> MatrixFoldingProof {
         // Create slices G, H, a, b backed by their respective
         // vectors.  This lets us reslice as we compress the lengths
@@ -94,6 +92,8 @@ impl MatrixFoldingProof {
             // compute L and R, more simply than before... no need for whatever performance
             // enhancements they used for first iteration?
             // QUESTION: figure out RistrettoPoint syntax? looks disgusting lol
+                //maybe create fn to do this so we only have to figure this out once and
+                // can test more easily?
             let L = RistrettoPoint::vartime_multiscalar_mul(
                 a_L.iter().chain(b_R.iter()).chain(iter::once(&c_L)),
                 G_R.iter().chain(H_L.iter()).chain(iter::once(Q)),
@@ -131,6 +131,8 @@ impl MatrixFoldingProof {
             G = G_L;
             H = H_L;
         }
+
+        //TODO: add while loops for m, k
 
         // declaration of struct for proof
         // note proof keeps its own record of L and R terms from each iteration, separate from transcript
