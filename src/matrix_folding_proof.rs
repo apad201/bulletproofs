@@ -88,7 +88,8 @@ impl MatrixFoldingProof {
         transcript.innerproduct_domain_sep(n as u64); // TODO this is not going to work, idk how to use transcripts though :(
 
         let lg_n = n.next_power_of_two().trailing_zeros() as usize;
-        let lg_m = m.next_power_of_two().trailing_zeros() as usize;
+        let lg_m = m.next_power_of_two().trailing_zeros() as usize; 
+        let lg_k    
         let mut L_vec = Vec::with_capacity(lg_n);
         let mut R_vec = Vec::with_capacity(lg_n);
 
