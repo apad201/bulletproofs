@@ -15,14 +15,14 @@ use crate::errors::ProofError;
 use crate::transcript::TranscriptProtocol;
 
 #[derive(Clone, Debug)]
-pub struct InnerProductProof {
+pub struct MatrixFoldingProof {
     pub(crate) L_vec: Vec<CompressedRistretto>,
     pub(crate) R_vec: Vec<CompressedRistretto>,
     pub(crate) a: Scalar,
     pub(crate) b: Scalar,
 }
 
-impl InnerProductProof {
+impl MatrixFoldingProof {
     /// Create an inner-product proof.
     ///
     /// The proof is created with respect to the bases \\(G\\), \\(H'\\),
@@ -36,14 +36,14 @@ impl InnerProductProof {
     /// either 0 or a power of 2.
     pub fn create(
         transcript: &mut Transcript,
-        Q: &RistrettoPoint,
         G_factors: &[Scalar],
         H_factors: &[Scalar],
-        mut G_vec: Vec<RistrettoPoint>,
-        mut H_vec: Vec<RistrettoPoint>,
-        mut a_vec: Vec<Scalar>,
-        mut b_vec: Vec<Scalar>,
-    ) -> InnerProductProof {
+        mut G_vec: Vec<Vec<RistrettoPoint>>, // say these are stored in row-major
+        mut H_vec: Vec<Vec<RistrettoPoint>>,
+        mut U_vec: Vec<Vec<RistrettoPoint>>, // this used to be Q and was not a vector nor mutable
+        mut a_vec: Vec<Vec<Scalar>>,
+        mut b_vec: Vec<Vec<Scalar>>,
+    ) -> MatrixFoldingProof {
         // Create slices G, H, a, b backed by their respective
         // vectors.  This lets us reslice as we compress the lengths
         // of the vectors in the main loop below.
@@ -53,21 +53,42 @@ impl InnerProductProof {
         let mut b = &mut b_vec[..];
 
         let mut n = G.len();
+        let mut m = G[0].len();
+        let mut k = H[0].len();
 
         // All of the input vectors must have the same length.
         assert_eq!(G.len(), n);
-        assert_eq!(H.len(), n);
+        assert_eq!(H.len(), m);
+        assert_eq!(Q.len(), n);
+        for j in 1..G.len() {
+            assert_eq!(G[j].len(), m);
+        }
+        for j in 1..H.len() {
+            assert_eq!(H[j].len(), k);
+        }
+        for j in 1..Q.len() {
+            assert_eq!(Q[j].len(), k);
+        }
         assert_eq!(a.len(), n);
-        assert_eq!(b.len(), n);
+        assert_eq!(b.len(), m);
+        for j in 1..a.len() {
+            assert_eq!(a[j].len(), m);
+        }
+        for j in 1..b.len() {
+            assert_eq!(b[j].len(), k);
+        }
         assert_eq!(G_factors.len(), n);
         assert_eq!(H_factors.len(), n);
 
         // All of the input vectors must have a length that is a power of two.
         assert!(n.is_power_of_two());
+        assert!(m.is_power_of_two());
+        assert!(k.is_power_of_two());
 
-        transcript.innerproduct_domain_sep(n as u64);
+        transcript.innerproduct_domain_sep(n as u64); // TODO this is not going to work, idk how to use transcripts though :(
 
         let lg_n = n.next_power_of_two().trailing_zeros() as usize;
+        let lg_m = m.next_power_of_two().trailing_zeros() as usize;
         let mut L_vec = Vec::with_capacity(lg_n);
         let mut R_vec = Vec::with_capacity(lg_n);
 
