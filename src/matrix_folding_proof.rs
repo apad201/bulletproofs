@@ -60,21 +60,21 @@ impl MatrixFoldingProof {
         assert_eq!(G.len(), n);
         assert_eq!(H.len(), m);
         assert_eq!(Q.len(), n);
-        for j in 1..G.len() {
+        for j in 0..G.len() {
             assert_eq!(G[j].len(), m);
         }
-        for j in 1..H.len() {
+        for j in 0..H.len() {
             assert_eq!(H[j].len(), k);
         }
-        for j in 1..Q.len() {
+        for j in 0..Q.len() {
             assert_eq!(Q[j].len(), k);
         }
         assert_eq!(a.len(), n);
         assert_eq!(b.len(), m);
-        for j in 1..a.len() {
+        for j in 0..a.len() {
             assert_eq!(a[j].len(), m);
         }
-        for j in 1..b.len() {
+        for j in 0..b.len() {
             assert_eq!(b[j].len(), k);
         }
         assert_eq!(G_factors.len(), n);
