@@ -38,47 +38,30 @@ impl MatrixFoldingProof {
         transcript: &mut Transcript,
         G_factors: &[Scalar],
         H_factors: &[Scalar],
-        mut G_vec: Vec<Vec<RistrettoPoint>>, // say these are stored in row-major
-        mut H_vec: Vec<Vec<RistrettoPoint>>,
-        mut U_vec: Vec<Vec<RistrettoPoint>>, // this used to be Q and was not a vector nor mutable
-        mut a_vec: Vec<Vec<Scalar>>,
-        mut b_vec: Vec<Vec<Scalar>>,
+        mut G_vec: Vec<RistrettoPoint>, // say these are stored in row-major
+        mut H_vec: Vec<RistrettoPoint>,
+        mut U_vec: Vec<RistrettoPoint>, // this used to be Q and was not a vector nor mutable
+        mut a_vec: Vec<Scalar>,
+        mut b_vec: Vec<Scalar>,
+        n: u32,
+        m: u32,
+        k: u32
     ) -> MatrixFoldingProof {
         // Create slices G, H, a, b backed by their respective
         // vectors.  This lets us reslice as we compress the lengths
         // of the vectors in the main loop below.
         let mut G = &mut G_vec[..];
         let mut H = &mut H_vec[..];
+        let mut U = &mut U_vec[..];
         let mut a = &mut a_vec[..];
         let mut b = &mut b_vec[..];
 
-        let mut n = G.len();
-        let mut m = G[0].len();
-        let mut k = H[0].len();
-
         // All of the input vectors must have the same length.
-        assert_eq!(G.len(), n);
-        assert_eq!(H.len(), m);
-        assert_eq!(Q.len(), n);
-        for j in 0..G.len() {
-            assert_eq!(G[j].len(), m);
-        }
-        for j in 0..H.len() {
-            assert_eq!(H[j].len(), k);
-        }
-        for j in 0..Q.len() {
-            assert_eq!(Q[j].len(), k);
-        }
-        assert_eq!(a.len(), n);
-        assert_eq!(b.len(), m);
-        for j in 0..a.len() {
-            assert_eq!(a[j].len(), m);
-        }
-        for j in 0..b.len() {
-            assert_eq!(b[j].len(), k);
-        }
-        assert_eq!(G_factors.len(), n);
-        assert_eq!(H_factors.len(), n);
+        assert_eq!(G.len(), n*m);
+        assert_eq!(H.len(), m*k);
+        assert_eq!(U.len(), n*k);
+        assert_eq!(a.len(), n*m);
+        assert_eq!(b.len(), m*k);
 
         // All of the input vectors must have a length that is a power of two.
         assert!(n.is_power_of_two());
@@ -89,89 +72,13 @@ impl MatrixFoldingProof {
 
         let lg_n = n.next_power_of_two().trailing_zeros() as usize;
         let lg_m = m.next_power_of_two().trailing_zeros() as usize; 
-        let lg_k    
-        let mut L_vec = Vec::with_capacity(lg_n);
-        let mut R_vec = Vec::with_capacity(lg_n);
-
-        // If it's the first iteration, unroll the Hprime = H*y_inv scalar mults
-        // into multiscalar muls, for performance.
-        if n != 1 {
-            // Split a, b, g, h into two halves and compute inner products for cross terms
-            n = n / 2;
-            let (a_L, a_R) = a.split_at_mut(n);
-            let (b_L, b_R) = b.split_at_mut(n);
-            let (G_L, G_R) = G.split_at_mut(n);
-            let (H_L, H_R) = H.split_at_mut(n);
-
-            let c_L = inner_product(&a_L, &b_R);
-            let c_R = inner_product(&a_R, &b_L);
-            
-
-            // some elliptic curve stuff? looks like computing L and R from paper:
-            // L takes g terms from n (midpoint) to 2n, whereas R takes first half 
-            // QUESTION: need to figure out how/what the a_L_i are / how they are treated (don't see them defined anywhere)
-            let L = RistrettoPoint::vartime_multiscalar_mul(
-                a_L.iter()
-                    .zip(G_factors[n..2 * n].into_iter())
-                    .map(|(a_L_i, g)| a_L_i * g)
-                    .chain(
-                        b_R.iter()
-                            .zip(H_factors[0..n].into_iter())
-                            .map(|(b_R_i, h)| b_R_i * h),
-                    )
-                    .chain(iter::once(c_L)),
-                G_R.iter().chain(H_L.iter()).chain(iter::once(Q)),
-            )
-            .compress();
-
-            let R = RistrettoPoint::vartime_multiscalar_mul(
-                a_R.iter()
-                    .zip(G_factors[0..n].into_iter())
-                    .map(|(a_R_i, g)| a_R_i * g)
-                    .chain(
-                        b_L.iter()
-                            .zip(H_factors[n..2 * n].into_iter())
-                            .map(|(b_L_i, h)| b_L_i * h),
-                    )
-                    .chain(iter::once(c_R)),
-                G_L.iter().chain(H_R.iter()).chain(iter::once(Q)),
-            )
-            .compress();
-            
-            // add L and R to L_vec, R_vec (which seem to be vecs of all L/R terms generated across whole proof)
-            L_vec.push(L);
-            R_vec.push(R);
-
-            // add (references to) L, R to transcript
-            transcript.append_point(b"L", &L);
-            transcript.append_point(b"R", &R);
-
-            // add challenge to transcript
-            let u = transcript.challenge_scalar(b"u");
-            let u_inv = u.invert();
-
-            // compute a', b', g', h', stored in a_L, b_L, G_L, and H_L, respectively
-            for i in 0..n {
-                a_L[i] = a_L[i] * u + u_inv * a_R[i];
-                b_L[i] = b_L[i] * u_inv + u * b_R[i];
-                G_L[i] = RistrettoPoint::vartime_multiscalar_mul(
-                    &[u_inv * G_factors[i], u * G_factors[n + i]],
-                    &[G_L[i], G_R[i]],
-                );
-                H_L[i] = RistrettoPoint::vartime_multiscalar_mul(
-                    &[u * H_factors[i], u_inv * H_factors[n + i]],
-                    &[H_L[i], H_R[i]],
-                )
-            }
-            // update a, b, G, H to correct values for next iteration
-            a = a_L;
-            b = b_L;
-            G = G_L;
-            H = H_L;
-        }
+        let lg_k = k.next_power_of_two().trailing_zeros() as usize;
+        let mut L_vec = Vec::with_capacity(lg_n + lg_m + lg_k); // theoretically number of iterations is sum of logs of dimensions?
+        let mut R_vec = Vec::with_capacity(lg_n + lg_m + lg_k);
 
         // all subsequent iterations besides first happen here (first happens above) 
         // (unless first is n=1, in which case both above and below blocks skipped)
+        // start by doing all the protocol 1 folds we can before moving on
         while n != 1 {
             // same as before; split the vectors into halves
             n = n / 2;
