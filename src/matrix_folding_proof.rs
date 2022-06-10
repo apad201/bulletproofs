@@ -77,9 +77,20 @@ impl MatrixFoldingProof {
         // all subsequent iterations besides first happen here (first happens above) 
         // (unless first is n=1, in which case both above and below blocks skipped)
         // start by doing all the protocol 1 folds we can before moving on
-        while n != 1 {
+        while n != 1 && m != 1 && k != 1 {
+            if n != 1 {
+                // fold A vertically
+            }
+            if m != 1 {
+                // fold A horizontally and B vertically
+            }
+            if k != 1 {
+                // fold B horizontally
+            }
             // same as before; split the vectors into halves
             n = n / 2;
+            
+
             let (a_L, a_R) = a.split_at_mut(n);
             let (b_L, b_R) = b.split_at_mut(n);
             let (G_L, G_R) = G.split_at_mut(n);
@@ -134,7 +145,7 @@ impl MatrixFoldingProof {
 
         //TODO: add while loops for m, k
 
-        // declaration of struct for proof
+        // return value
         // note proof keeps its own record of L and R terms from each iteration, separate from transcript
         InnerProductProof {
             L_vec: L_vec,
@@ -143,6 +154,22 @@ impl MatrixFoldingProof {
             b: b[0],
         }
     }
+
+    /// splitting methods
+    pub(crate) fn split_horizontally(&mut a: Vec<Scalar>, m: u32) -> (&mut Vec<Scalar>, &mut Vec<Scalar>) {
+        // ??? basically I think it's impossible to avoid taking a transpose. Slices (which are used everywhere else)
+        // cannot possibly work because slices are by definition only for contiguous blocks of memory, and the left-right
+        // blocks will never be contiguous in memory unless we take the transpose
+
+    }
+    pub(crate) fn split_vertically(&mut a: Vec<Scalar>, m: u32) -> (&mut Vec<Scalar>, &mut Vec<Scalar>) {
+        // this one should be easier...
+        a.split_at_mut(n/2)
+        // lol
+    }
+
+
+
 
     /// Computes three vectors of verification scalars \\([u\_{i}^{2}]\\), \\([u\_{i}^{-2}]\\) and \\([s\_{i}]\\) for combined multiscalar multiplication
     /// in a parent protocol. See [inner product protocol notes](index.html#verification-equation) for details.
