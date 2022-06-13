@@ -41,9 +41,9 @@ impl MatrixFoldingProof {
         mut U_vec: Vec<RistrettoPoint>, // this used to be Q and was not a vector nor mutable
         mut a_vec: Vec<Scalar>,
         mut b_vec: Vec<Scalar>,
-        mut n: u32, //not sure if these need to be mutable but I'm assuming yes
-        mut m: u32,
-        mut k: u32
+        mut n: usize, //not sure if these need to be mutable but I'm assuming yes
+        mut m: usize,
+        mut k: usize
     ) -> MatrixFoldingProof {
         // Create slices G, H, a, b backed by their respective
         // vectors.  This lets us reslice as we compress the lengths
@@ -147,7 +147,7 @@ impl MatrixFoldingProof {
 
         // return value
         // note proof keeps its own record of L and R terms from each iteration, separate from transcript
-        InnerProductProof {
+        MatrixFoldingProof {
             L_vec: L_vec,
             R_vec: R_vec,
             a: a[0],
@@ -156,16 +156,35 @@ impl MatrixFoldingProof {
     }
 
     /// splitting methods
-    pub(crate) fn split_horizontally(&mut a: Vec<Scalar>, m: u32) -> (&mut Vec<Scalar>, &mut Vec<Scalar>) {
+    pub(crate) fn split_horizontally(a: &mut Vec<Scalar>, m: u32) -> (&'static mut [Scalar], &'static mut [Scalar]) {
         // ??? basically I think it's impossible to avoid taking a transpose. Slices (which are used everywhere else)
         // cannot possibly work because slices are by definition only for contiguous blocks of memory, and the left-right
         // blocks will never be contiguous in memory unless we take the transpose
 
     }
-    pub(crate) fn split_vertically(&mut a: Vec<Scalar>, m: u32) -> (&mut Vec<Scalar>, &mut Vec<Scalar>) {
+    pub(crate) fn split_vertically(a: &mut Vec<Scalar>, m: usize) -> (&'_ mut [Scalar], &'_ mut [Scalar]) {
         // this one should be easier...
-        a.split_at_mut(n/2)
+        a.split_at_mut(m/2)
         // lol
+    }
+
+    // I will assume the matrices are Vec<Scalar>s, rather than [Sacalar]s.
+    // Also: I assume a is row-major, b is a row-major representation of b TRANSPOSE
+    // so we want to calculate a*b, but we are given the transpose of b as input
+    // result will be stored in c, which should come in EMPTY
+    // a should have n rows and b should have k columns (so b transpose should have k rows)
+    pub(crate) fn mat_mult(a: &Vec<Scalar>, b: &Vec<Scalar>, c: &mut Vec<Scalar>, n: usize, k: usize) {
+        let m = a.len()/n;
+        assert_eq!(m, b.len()/k);
+        for a_row in a.chunks(m) {
+            for b_col in b.chunks(m) {
+                let mut val = Scalar::zero();
+                for i in 0..m {
+                    val += a_row[i] * b_col[i];
+                }
+                c.push(val);
+            }
+        }
     }
 
 
