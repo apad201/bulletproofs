@@ -40,7 +40,7 @@ impl MatrixFoldingProof {
         mut H_vec: Vec<RistrettoPoint>,
         mut U_vec: Vec<RistrettoPoint>, // this used to be Q and was not a vector nor mutable
         mut a_vec: Vec<Scalar>,
-        mut b_vec: Vec<Scalar>,
+        mut b_vec: Vec<Scalar>, // I WILL ASSUME b CONTAINS THE TRANSPOSE OF THE MATRIX B!!!!
         mut n: usize, //not sure if these need to be mutable but I'm assuming yes
         mut m: usize,
         mut k: usize
@@ -53,6 +53,8 @@ impl MatrixFoldingProof {
         let mut U = &mut U_vec[..];
         let mut a = &mut a_vec[..];
         let mut b = &mut b_vec[..];
+
+        let one = Scalar::one();
 
         // All of the input vectors must have the same length.
         assert_eq!(G.len(), n*m);
@@ -73,77 +75,73 @@ impl MatrixFoldingProof {
         let lg_k = k.next_power_of_two().trailing_zeros() as usize;
         let mut L_vec = Vec::with_capacity(lg_n + lg_m + lg_k); // theoretically number of iterations is sum of logs of dimensions?
         let mut R_vec = Vec::with_capacity(lg_n + lg_m + lg_k);
+        
+        // compute C (or else we'd need to have it passed in as argument)
+        let mut c_vec = Vec::with_capacity(n*k);
+        mat_mult(a, b, &mut c_vec, n, k);
+        let mut c = &mut c_vec[..];
 
         // all subsequent iterations besides first happen here (first happens above) 
         // (unless first is n=1, in which case both above and below blocks skipped)
         // start by doing all the protocol 1 folds we can before moving on
-        while n != 1 && m != 1 && k != 1 {
+        while n != 1 && k != 1 {
             if n != 1 {
-                // fold A vertically
-            }
-            if m != 1 {
-                // fold A horizontally and B vertically
+                // fold A and G vertically
+                n = n/2;
+                let (a_t, a_b) = a.split_at_mut(n*m);
+                let (c_t, c_b) = c.split_at_mut(n*k);
+                let (G_t, G_b) = G.split_at_mut(n*m);
+                let (U_t, U_b) = U.split_at_mut(n*k);
+
+                // compute L and R
+                let L = RistrettoPoint::vartime_multiscalar_mul(
+                    a_t.iter().chain(c_t.iter()), 
+                    G_b.iter().chain(U_b.iter())
+                ).compress();
+
+                let R = RistrettoPoint::vartime_multiscalar_mul(
+                    a_b.iter().chain(c_b.iter()),
+                    G_t.iter().chain(U_t.iter())
+                ).compress();
+
+                // add L R to records for return struct
+                L_vec.push(L);
+                R_vec.push(R);
+
+                // add L R to transcript
+                transcript.append_point(b"L", &L);
+                transcript.append_point(b"R", &R);      
+
+                // get challenge and its inverse
+                let x = transcript.challenge_scalar(b"u");
+                let x_inv = x.invert();
+
+                // compute a', G'
+                for i in 1..(n*m) {
+                    a_t[i] = x * a_t[i] + a_b[i];
+                    G_t[i] = RistrettoPoint::vartime_multiscalar_mul(&[x_inv, one], &[G_t[i], G_b[i]]);
+                }
+
+                // compute c', U'
+                for i in 1..(n*k) {
+                    c_t[i] = x * c_t[i] + c_b[i];
+                    U_t[i] = RistrettoPoint::vartime_multiscalar_mul(&[x_inv, one], &[U_t[i], U_b[i]]);
+                }
+
+                // update a, c, G, U
+                a = a_t;
+                c = c_t;
+                G = G_t;
+                U = U_t;
             }
             if k != 1 {
-                // fold B horizontally
+                // fold B horizontally, i.e. fold b (which stores B^T) vertically
+                k = k/2;
+                
             }
-            // same as before; split the vectors into halves
-            n = n / 2;
-            
-
-            let (a_L, a_R) = a.split_at_mut(n);
-            let (b_L, b_R) = b.split_at_mut(n);
-            let (G_L, G_R) = G.split_at_mut(n);
-            let (H_L, H_R) = H.split_at_mut(n);
-
-            // compute cross term inner products
-            let c_L = inner_product(&a_L, &b_R);
-            let c_R = inner_product(&a_R, &b_L);
-
-            // compute L and R, more simply than before... no need for whatever performance
-            // enhancements they used for first iteration?
-            // QUESTION: figure out RistrettoPoint syntax? looks disgusting lol
-                //maybe create fn to do this so we only have to figure this out once and
-                // can test more easily?
-            let L = RistrettoPoint::vartime_multiscalar_mul(
-                a_L.iter().chain(b_R.iter()).chain(iter::once(&c_L)),
-                G_R.iter().chain(H_L.iter()).chain(iter::once(Q)),
-            )
-            .compress();
-
-            let R = RistrettoPoint::vartime_multiscalar_mul(
-                a_R.iter().chain(b_L.iter()).chain(iter::once(&c_R)),
-                G_L.iter().chain(H_R.iter()).chain(iter::once(Q)),
-            )
-            .compress();
-
-            // add L, R to appropriate records, and then to transcript
-            L_vec.push(L);
-            R_vec.push(R);
-
-            transcript.append_point(b"L", &L);
-            transcript.append_point(b"R", &R);
-
-            // get challenge and add to transcript
-            let u = transcript.challenge_scalar(b"u");
-            let u_inv = u.invert();
-
-            // compute a', b', G', H', storing in _L vectors
-            for i in 0..n {
-                a_L[i] = a_L[i] * u + u_inv * a_R[i];
-                b_L[i] = b_L[i] * u_inv + u * b_R[i];
-                G_L[i] = RistrettoPoint::vartime_multiscalar_mul(&[u_inv, u], &[G_L[i], G_R[i]]);
-                H_L[i] = RistrettoPoint::vartime_multiscalar_mul(&[u, u_inv], &[H_L[i], H_R[i]]);
-            }
-
-            // update for recursion
-            a = a_L;
-            b = b_L;
-            G = G_L;
-            H = H_L;
+     
         }
-
-        //TODO: add while loops for m, k
+        //TODO: add while loops for m (inner product proof duplicate basically)
 
         // return value
         // note proof keeps its own record of L and R terms from each iteration, separate from transcript
@@ -156,38 +154,11 @@ impl MatrixFoldingProof {
     }
 
     /// splitting methods
-    pub(crate) fn split_horizontally(a: &mut Vec<Scalar>, m: u32) -> (&'static mut [Scalar], &'static mut [Scalar]) {
-        // ??? basically I think it's impossible to avoid taking a transpose. Slices (which are used everywhere else)
-        // cannot possibly work because slices are by definition only for contiguous blocks of memory, and the left-right
-        // blocks will never be contiguous in memory unless we take the transpose
-
-    }
-    pub(crate) fn split_vertically(a: &mut Vec<Scalar>, m: usize) -> (&'_ mut [Scalar], &'_ mut [Scalar]) {
+    fn split_vertically(a: &mut [Scalar], m: usize) -> (&'_ mut [Scalar], &'_ mut [Scalar]) {
         // this one should be easier...
         a.split_at_mut(m/2)
         // lol
     }
-
-    // I will assume the matrices are Vec<Scalar>s, rather than [Sacalar]s.
-    // Also: I assume a is row-major, b is a row-major representation of b TRANSPOSE
-    // so we want to calculate a*b, but we are given the transpose of b as input
-    // result will be stored in c, which should come in EMPTY
-    // a should have n rows and b should have k columns (so b transpose should have k rows)
-    pub(crate) fn mat_mult(a: &Vec<Scalar>, b: &Vec<Scalar>, c: &mut Vec<Scalar>, n: usize, k: usize) {
-        let m = a.len()/n;
-        assert_eq!(m, b.len()/k);
-        for a_row in a.chunks(m) {
-            for b_col in b.chunks(m) {
-                let mut val = Scalar::zero();
-                for i in 0..m {
-                    val += a_row[i] * b_col[i];
-                }
-                c.push(val);
-            }
-        }
-    }
-
-
 
 
     /// Computes three vectors of verification scalars \\([u\_{i}^{2}]\\), \\([u\_{i}^{-2}]\\) and \\([s\_{i}]\\) for combined multiscalar multiplication
@@ -410,6 +381,25 @@ impl MatrixFoldingProof {
             .ok_or(ProofError::FormatError)?;
 
         Ok(InnerProductProof { L_vec, R_vec, a, b })
+    }
+}
+
+// I will assume the matrices are Vec<Scalar>s, rather than [Sacalar]s.
+// Also: I assume a is row-major, b is a row-major representation of b TRANSPOSE
+// so we want to calculate a*b, but we are given the transpose of b as input
+// result will be stored in c, which should come in EMPTY
+// a should have n rows and b should have k columns (so b transpose should have k rows)
+fn mat_mult(a: &[Scalar], b: &[Scalar], c: &mut Vec<Scalar>, n: usize, k: usize) {
+    let m = a.len()/n;
+    assert_eq!(m, b.len()/k);
+    for a_row in a.chunks(m) {
+        for b_col in b.chunks(m) {
+            let mut val = Scalar::zero();
+            for i in 0..m {
+                val += a_row[i] * b_col[i];
+            }
+            c.push(val);
+        }
     }
 }
 
