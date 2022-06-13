@@ -84,64 +84,109 @@ impl MatrixFoldingProof {
         // all subsequent iterations besides first happen here (first happens above) 
         // (unless first is n=1, in which case both above and below blocks skipped)
         // start by doing all the protocol 1 folds we can before moving on
-        while n != 1 && k != 1 {
-            if n != 1 {
-                // fold A and G vertically
-                n = n/2;
-                let (a_t, a_b) = a.split_at_mut(n*m);
-                let (c_t, c_b) = c.split_at_mut(n*k);
-                let (G_t, G_b) = G.split_at_mut(n*m);
-                let (U_t, U_b) = U.split_at_mut(n*k);
+        while n != 1 {
+            // fold A and G vertically
+            n = n/2;
+            let (a_t, a_b) = a.split_at_mut(n*m);
+            let (c_t, c_b) = c.split_at_mut(n*k);
+            let (G_t, G_b) = G.split_at_mut(n*m);
+            let (U_t, U_b) = U.split_at_mut(n*k);
 
-                // compute L and R
-                let L = RistrettoPoint::vartime_multiscalar_mul(
-                    a_t.iter().chain(c_t.iter()), 
-                    G_b.iter().chain(U_b.iter())
-                ).compress();
+            // compute L and R
+            let L = RistrettoPoint::vartime_multiscalar_mul(
+                a_t.iter().chain(c_t.iter()), 
+                G_b.iter().chain(U_b.iter())
+            ).compress();
 
-                let R = RistrettoPoint::vartime_multiscalar_mul(
-                    a_b.iter().chain(c_b.iter()),
-                    G_t.iter().chain(U_t.iter())
-                ).compress();
+            let R = RistrettoPoint::vartime_multiscalar_mul(
+                a_b.iter().chain(c_b.iter()),
+                G_t.iter().chain(U_t.iter())
+            ).compress();
 
-                // add L R to records for return struct
-                L_vec.push(L);
-                R_vec.push(R);
+            // add L R to records for return struct
+            L_vec.push(L);
+            R_vec.push(R);
 
-                // add L R to transcript
-                transcript.append_point(b"L", &L);
-                transcript.append_point(b"R", &R);      
+            // add L R to transcript
+            transcript.append_point(b"L", &L);
+            transcript.append_point(b"R", &R);      
 
-                // get challenge and its inverse
-                let x = transcript.challenge_scalar(b"u");
-                let x_inv = x.invert();
+            // get challenge and its inverse
+            let x = transcript.challenge_scalar(b"x");
+            let x_inv = x.invert();
 
-                // compute a', G'
-                for i in 1..(n*m) {
-                    a_t[i] = x * a_t[i] + a_b[i];
-                    G_t[i] = RistrettoPoint::vartime_multiscalar_mul(&[x_inv, one], &[G_t[i], G_b[i]]);
-                }
-
-                // compute c', U'
-                for i in 1..(n*k) {
-                    c_t[i] = x * c_t[i] + c_b[i];
-                    U_t[i] = RistrettoPoint::vartime_multiscalar_mul(&[x_inv, one], &[U_t[i], U_b[i]]);
-                }
-
-                // update a, c, G, U
-                a = a_t;
-                c = c_t;
-                G = G_t;
-                U = U_t;
+            // compute a', G'
+            for i in 1..(n*m) {
+                a_t[i] = x * a_t[i] + a_b[i];
+                G_t[i] = RistrettoPoint::vartime_multiscalar_mul(&[x_inv, one], &[G_t[i], G_b[i]]);
             }
-            if k != 1 {
-                // fold B horizontally, i.e. fold b (which stores B^T) vertically
-                k = k/2;
-                
+
+            // compute c', U'
+            for i in 1..(n*k) {
+                c_t[i] = x * c_t[i] + c_b[i];
+                U_t[i] = RistrettoPoint::vartime_multiscalar_mul(&[x_inv, one], &[U_t[i], U_b[i]]);
             }
-     
+
+            // update a, c, G, U
+            a = a_t;
+            c = c_t;
+            G = G_t;
+            U = U_t;
         }
-        //TODO: add while loops for m (inner product proof duplicate basically)
+
+
+        // now fold B
+        // Technically we need to find transpose of C, but since A is now row vector, C is a row vector, so we can just
+        // "re-interpret" it as a column vector and no actual work is needed to transpose it! which is very nice
+        while k != 1 {
+            k = k/2;
+            let (b_l, b_r) = b.split_at_mut(m*k);
+            let (c_l, c_r) = c.split_at_mut(k); // n == 1 by the time we get here
+            let (H_l, H_r) = H.split_at_mut(m*k);
+            let (U_l, U_r) = U.split_at_mut(k);
+
+            // compute L and R
+            let L = RistrettoPoint::vartime_multiscalar_mul(
+                b_l.iter().chain(c_l.iter()), 
+                H_r.iter().chain(U_r.iter())
+            ).compress();
+
+            let R = RistrettoPoint::vartime_multiscalar_mul(
+                b_r.iter().chain(c_r.iter()),
+                H_l.iter().chain(U_l.iter())
+            ).compress();
+
+            // add L R to records for return struct
+            L_vec.push(L);
+            R_vec.push(R);
+
+            // add L R to transcript
+            transcript.append_point(b"L", &L);
+            transcript.append_point(b"R", &R);      
+
+            // get challenge and its inverse
+            let x = transcript.challenge_scalar(b"x");
+            let x_inv = x.invert();
+
+            for i in 1..(m*k) {
+                b_l[i] = x * b_l[i] + b_r[i];
+                H_l[i] = RistrettoPoint::vartime_multiscalar_mul(&[x_inv, one], &[H_l[i], H_r[i]]);
+            }
+
+            for i in 1..k {
+                c_l[i] = x * c_l[i] + c_r[i];
+                U_l[i] = RistrettoPoint::vartime_multiscalar_mul(&[x_inv, one], &[U_l[i], U_r[i]]);
+            }
+
+            b = b_l;
+            H = H_l;
+            c = c_l;
+            U = U_l;
+        }
+     
+        // now a is 1 x m and b is m x 1 and c is 1 x 1. 
+        // because b stores B^T, which is a row vector, which we can reinterpret as the column vector B! yay
+        
 
         // return value
         // note proof keeps its own record of L and R terms from each iteration, separate from transcript
