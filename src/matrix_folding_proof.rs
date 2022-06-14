@@ -81,9 +81,7 @@ impl MatrixFoldingProof {
         mat_mult(a, b, &mut c_vec, n, k);
         let mut c = &mut c_vec[..];
 
-        // all subsequent iterations besides first happen here (first happens above) 
-        // (unless first is n=1, in which case both above and below blocks skipped)
-        // start by doing all the protocol 1 folds we can before moving on
+        // first fold A vertically
         while n != 1 {
             // fold A and G vertically
             n = n/2;
@@ -135,8 +133,9 @@ impl MatrixFoldingProof {
         }
 
 
-        // now fold B
-        // Technically we need to find transpose of C, but since A is now row vector, C is a row vector, so we can just
+        // now fold B horizontally (i.e. fold b, which stores B^T, vertically)
+        // Technically we need to find transpose of C (since it must also be folded horizontally), 
+        // but since A is now a row vector, C is a row vector, so we can just
         // "re-interpret" it as a column vector and no actual work is needed to transpose it! which is very nice
         while k != 1 {
             k = k/2;
