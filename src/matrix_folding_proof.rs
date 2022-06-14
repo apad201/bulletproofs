@@ -186,7 +186,53 @@ impl MatrixFoldingProof {
      
         // now a is 1 x m and b is m x 1 and c is 1 x 1. 
         // because b stores B^T, which is a row vector, which we can reinterpret as the column vector B! yay
-        
+        // at this point it is just an inner product proof
+
+        while m != 1 {
+            m = m/2;
+            let (a_l, a_r) = a.split_at_mut(m);
+            let (b_t, b_b) = b.split_at_mut(m);
+            let (G_l, G_r) = G.split_at_mut(m);
+            let (H_t, H_b) = H.split_at_mut(m);
+
+            let c_l = inner_product(a_l, b_b);
+            let c_r = inner_product(a_r, b_t);
+
+            let L = RistrettoPoint::vartime_multiscalar_mul(
+                a_l.iter().chain(b_t.iter().chain(iter::once(&c_l))), 
+                G_r.iter().chain(H_b.iter().chain(U.iter()))
+            ).compress(); // at this point U should have length 1
+
+            let R = RistrettoPoint::vartime_multiscalar_mul(
+                a_r.iter().chain(b_b.iter().chain(iter::once(&c_r))), 
+                G_l.iter().chain(H_t.iter().chain(U.iter()))
+            ).compress();
+
+             // add L R to records for return struct
+             L_vec.push(L);
+             R_vec.push(R);
+ 
+             // add L R to transcript
+             transcript.append_point(b"L", &L);
+             transcript.append_point(b"R", &R);  
+
+             // get challenge and its inverse
+            let x = transcript.challenge_scalar(b"x");
+            let x_inv = x.invert();
+
+            for i in 1..m {
+                a_l[i] = x * a_l[i] + a_r[i];
+                b_t[i] = x_inv * b_t[i] + b_b[i];
+                G_l[i] = RistrettoPoint::vartime_multiscalar_mul(&[x_inv, one], &[G_l[i], G_r[i]]);
+                H_t[i] = RistrettoPoint::vartime_multiscalar_mul(&[x, one], &[H_t[i], H_b[i]]);
+            }
+
+            a = a_l;
+            b = b_t;
+            G = G_l;
+            H = H_t;
+
+        }
 
         // return value
         // note proof keeps its own record of L and R terms from each iteration, separate from transcript
@@ -392,7 +438,7 @@ impl MatrixFoldingProof {
     /// * \\(n\\) is larger or equal to 32 (proof is too big),
     /// * any of \\(2n\\) points are not valid compressed Ristretto points,
     /// * any of 2 scalars are not canonical scalars modulo Ristretto group order.
-    pub fn from_bytes(slice: &[u8]) -> Result<InnerProductProof, ProofError> {
+    pub fn from_bytes(slice: &[u8]) -> Result<MatrixFoldingProof, ProofError> {
         let b = slice.len();
         if b % 32 != 0 {
             return Err(ProofError::FormatError);
@@ -425,7 +471,7 @@ impl MatrixFoldingProof {
         let b = Scalar::from_canonical_bytes(read32(&slice[pos + 32..]))
             .ok_or(ProofError::FormatError)?;
 
-        Ok(InnerProductProof { L_vec, R_vec, a, b })
+        Ok(MatrixFoldingProof { L_vec, R_vec, a, b })
     }
 }
 
@@ -464,7 +510,7 @@ pub fn inner_product(a: &[Scalar], b: &[Scalar]) -> Scalar {
     out
 }
 
-#[cfg(test)]
+/*#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -508,7 +554,7 @@ mod tests {
         );
 
         let mut verifier = Transcript::new(b"innerproducttest");
-        let proof = InnerProductProof::create(
+        let proof = MatrixFoldingProof::create(
             &mut verifier,
             &Q,
             &G_factors,
@@ -533,7 +579,7 @@ mod tests {
             )
             .is_ok());
 
-        let proof = InnerProductProof::from_bytes(proof.to_bytes().as_slice()).unwrap();
+        let proof = MatrixFoldingProof::from_bytes(proof.to_bytes().as_slice()).unwrap();
         let mut verifier = Transcript::new(b"innerproducttest");
         assert!(proof
             .verify(
@@ -591,3 +637,4 @@ mod tests {
         assert_eq!(Scalar::from(40u64), inner_product(&a, &b));
     }
 }
+*/
