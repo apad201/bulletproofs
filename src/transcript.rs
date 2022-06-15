@@ -13,6 +13,9 @@ pub trait TranscriptProtocol {
     /// Append a domain separator for a length-`n` inner product proof.
     fn innerproduct_domain_sep(&mut self, n: u64);
 
+    // domain separator for matrix folding proof with A n x m, B m x k
+    fn matrixfolding_domain_sep(&mut self, n: u64, m: u64, k: u64);
+
     /// Append a domain separator for a constraint system.
     fn r1cs_domain_sep(&mut self);
 
@@ -50,6 +53,13 @@ impl TranscriptProtocol for Transcript {
     fn innerproduct_domain_sep(&mut self, n: u64) {
         self.append_message(b"dom-sep", b"ipp v1");
         self.append_u64(b"n", n);
+    }
+
+    fn matrixfolding_domain_sep(&mut self, n: u64, m: u64, k: u64) {
+        self.append_message(b"dom-sep", b"fp v1");
+        self.append_u64(b"n",n);
+        self.append_u64(b"m",m);
+        self.append_u64(b"k",k);
     }
 
     fn r1cs_domain_sep(&mut self) {

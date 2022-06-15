@@ -69,7 +69,7 @@ impl MatrixFoldingProof {
         assert!(m.is_power_of_two());
         assert!(k.is_power_of_two());
 
-        transcript.innerproduct_domain_sep(n as u64); // TODO this is not going to work, idk how to use transcripts though :(
+        transcript.matrixfolding_domain_sep(n as u64, m as u64, k as u64); 
 
         let lg_n = n.next_power_of_two().trailing_zeros() as usize;
         let lg_m = m.next_power_of_two().trailing_zeros() as usize; 
@@ -243,14 +243,6 @@ impl MatrixFoldingProof {
             b: b[0],
         }
     }
-
-    /// splitting methods
-    fn split_vertically(a: &mut [Scalar], m: usize) -> (&'_ mut [Scalar], &'_ mut [Scalar]) {
-        // this one should be easier...
-        a.split_at_mut(m/2)
-        // lol
-    }
-
 
     /// Computes three vectors of verification scalars \\([u\_{i}^{2}]\\), \\([u\_{i}^{-2}]\\) and \\([s\_{i}]\\) for combined multiscalar multiplication
     /// in a parent protocol. See [inner product protocol notes](index.html#verification-equation) for details.
