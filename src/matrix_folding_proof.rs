@@ -17,8 +17,12 @@ use crate::transcript::TranscriptProtocol;
 
 #[derive(Clone, Debug)]
 pub struct MatrixFoldingProof {
-    pub(crate) L_vec: Vec<CompressedRistretto>,
-    pub(crate) R_vec: Vec<CompressedRistretto>,
+    pub(crate) L_vec1: Vec<CompressedRistretto>,
+    pub(crate) R_vec1: Vec<CompressedRistretto>,
+    pub(crate) L_vec3: Vec<CompressedRistretto>,
+    pub(crate) R_vec3: Vec<CompressedRistretto>,
+    pub(crate) L_vec2: Vec<CompressedRistretto>,
+    pub(crate) R_vec2: Vec<CompressedRistretto>,
     pub(crate) a: Scalar,
     pub(crate) b: Scalar,
 }
@@ -74,9 +78,15 @@ impl MatrixFoldingProof {
         let lg_n = n.next_power_of_two().trailing_zeros() as usize;
         let lg_m = m.next_power_of_two().trailing_zeros() as usize; 
         let lg_k = k.next_power_of_two().trailing_zeros() as usize;
-        let mut L_vec = Vec::with_capacity(lg_n + lg_m + lg_k); // theoretically number of iterations is sum of logs of dimensions?
-        let mut R_vec = Vec::with_capacity(lg_n + lg_m + lg_k);
         
+        let mut L_vec1 = Vec::with_capacity(lg_n);
+        let mut R_vec1 = Vec::with_capacity(lg_n);
+        let mut L_vec3 = Vec::with_capacity(lg_k);
+        let mut R_vec3 = Vec::with_capacity(lg_k);
+        let mut L_vec2 = Vec::with_capacity(lg_m);
+        let mut R_vec2 = Vec::with_capacity(lg_m);
+
+
         // compute C (or else we'd need to have it passed in as argument)
         let mut c_vec = Vec::with_capacity(n*k);
         mat_mult(a, b, &mut c_vec, n, k);
@@ -103,8 +113,8 @@ impl MatrixFoldingProof {
             ).compress();
 
             // add L R to records for return struct
-            L_vec.push(L);
-            R_vec.push(R);
+            L_vec1.push(L);
+            R_vec1.push(R);
 
             // add L R to transcript
             transcript.append_point(b"L", &L);
@@ -157,8 +167,8 @@ impl MatrixFoldingProof {
             ).compress();
 
             // add L R to records for return struct
-            L_vec.push(L);
-            R_vec.push(R);
+            L_vec3.push(L);
+            R_vec3.push(R);
 
             // add L R to transcript
             transcript.append_point(b"L", &L);
@@ -209,8 +219,8 @@ impl MatrixFoldingProof {
             ).compress();
 
              // add L R to records for return struct
-             L_vec.push(L);
-             R_vec.push(R);
+             L_vec2.push(L);
+             R_vec2.push(R);
  
              // add L R to transcript
              transcript.append_point(b"L", &L);
@@ -237,8 +247,12 @@ impl MatrixFoldingProof {
         // return value
         // note proof keeps its own record of L and R terms from each iteration, separate from transcript
         MatrixFoldingProof {
-            L_vec: L_vec,
-            R_vec: R_vec,
+            L_vec1: L_vec1,
+            R_vec1: R_vec1,
+            L_vec3: L_vec3,
+            R_vec3: R_vec3,
+            L_vec2: L_vec2,
+            R_vec2: R_vec2,
             a: a[0],
             b: b[0],
         }
@@ -256,10 +270,16 @@ impl MatrixFoldingProof {
     pub(crate) fn verification_scalars(
         &self,
         n: usize,
+        m: usize,
+        k: usize,
         transcript: &mut Transcript,
     ) -> Result<(Vec<Scalar>, Vec<Scalar>, Vec<Scalar>), ProofError> {
-        let lg_n = self.L_vec.len();
-        if lg_n >= 32 {
+        let lg_n = self.L_vec1.len();
+        let lg_m = self.L_vec2.len();
+        let lg_k = self.L_vec3.len();
+
+        let num_rounds = lg_n + lg_m + lg_k;
+        if num_rounds >= 32 {
             // 4 billion multiplications should be enough for anyone
             // and this check prevents overflow in 1<<lg_n below.
             return Err(ProofError::VerificationError);
@@ -268,26 +288,43 @@ impl MatrixFoldingProof {
             return Err(ProofError::VerificationError);
         }
 
-        transcript.innerproduct_domain_sep(n as u64);
+        transcript.matrixfolding_domain_sep(n as u64, m as u64, k as u64);
 
         // 1. Recompute x_k,...,x_1 based on the proof transcript
-        // idk it looks like their notation is inconsistent, here they talk about x but I think they mean what they're calling u... 
-        // maybe got confused with the paper's notation ??
 
-        let mut challenges = Vec::with_capacity(lg_n);
-        for (L, R) in self.L_vec.iter().zip(self.R_vec.iter()) {
+        let mut challenges1 = Vec::with_capacity(lg_n);
+        let mut challenges3 = Vec::with_capacity(lg_k);
+        let mut challenges2 = Vec::with_capacity(lg_m);
+
+        for (L, R) in self.L_vec1.iter().zip(self.R_vec1.iter()) {
             transcript.validate_and_append_point(b"L", L)?;
             transcript.validate_and_append_point(b"R", R)?;
-            challenges.push(transcript.challenge_scalar(b"u"));
+            challenges1.push(transcript.challenge_scalar(b"x"));
         }
+        for (L, R) in self.L_vec3.iter().zip(self.R_vec3.iter()) {
+            transcript.validate_and_append_point(b"L", L)?;
+            transcript.validate_and_append_point(b"R", R)?;
+            challenges3.push(transcript.challenge_scalar(b"x"));
+        }
+        for (L, R) in self.L_vec2.iter().zip(self.R_vec2.iter()) {
+            transcript.validate_and_append_point(b"L", L)?;
+            transcript.validate_and_append_point(b"R", R)?;
+            challenges2.push(transcript.challenge_scalar(b"x"));
+        }
+
 
         // 2. Compute 1/(u_k...u_1) and 1/u_k, ..., 1/u_1
 
-        let mut challenges_inv = challenges.clone();
-        let allinv = Scalar::batch_invert(&mut challenges_inv);
+        let mut challenges1_inv = challenges1.clone();
+        let allinv1 = Scalar::batch_invert(&mut challenges1_inv);
+        let mut challenges3_inv = challenges3.clone();
+        let allinv3 = Scalar::batch_invert(&mut challenges3_inv);
+        let mut challenges2_inv = challenges2.clone();
+        let allinv2 = Scalar::batch_invert(&mut challenges2_inv);
 
         // 3. Compute u_i^2 and (1/u_i)^2
 
+        /* WE DON'T NEED SQUARES because we made better choices
         for i in 0..lg_n {
             // XXX missing square fn upstream
             challenges[i] = challenges[i] * challenges[i];
@@ -295,10 +332,14 @@ impl MatrixFoldingProof {
         }
         let challenges_sq = challenges;
         let challenges_inv_sq = challenges_inv;
-
+        */
         // 4. Compute s values inductively.
 
-        let mut s = Vec::with_capacity(n);
+        let mut s_G = Vec::with_capacity(n*m);
+        let mut s_H = Vec::with_capacity(m*k);
+        let mut s_U = Vec::with_capacity(n*k);
+
+        // worked up to here, remaining portion needs to be written (unlike earlier parts, writing this part requires using multiple brain cells)
         s.push(allinv);
         for i in 1..n {
             let lg_i = (32 - 1 - (i as u32).leading_zeros()) as usize;
@@ -430,7 +471,7 @@ impl MatrixFoldingProof {
     /// * \\(n\\) is larger or equal to 32 (proof is too big),
     /// * any of \\(2n\\) points are not valid compressed Ristretto points,
     /// * any of 2 scalars are not canonical scalars modulo Ristretto group order.
-    pub fn from_bytes(slice: &[u8]) -> Result<MatrixFoldingProof, ProofError> {
+    /* pub fn from_bytes(slice: &[u8]) -> Result<MatrixFoldingProof, ProofError> {
         let b = slice.len();
         if b % 32 != 0 {
             return Err(ProofError::FormatError);
@@ -465,6 +506,7 @@ impl MatrixFoldingProof {
 
         Ok(MatrixFoldingProof { L_vec, R_vec, a, b })
     }
+    */
 }
 
 // I will assume the matrices are Vec<Scalar>s, rather than [Sacalar]s.
