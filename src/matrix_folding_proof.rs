@@ -316,14 +316,21 @@ impl MatrixFoldingProof {
         challengesG.extend(&challenges2);
         let mut challengesH = challenges3.clone();
         challengesH.extend(&challenges2);
+        let mut challengesU = challenges1.clone();
+        challengesU.extend(&challenges3);
+
         // 2. Compute 1/(u_k...u_1) and 1/u_k, ..., 1/u_1
 
-        let mut challenges1_inv = challenges1.clone();
-        let allinv1 = Scalar::batch_invert(&mut challenges1_inv);
-        let mut challenges3_inv = challenges3.clone();
-        let allinv3 = Scalar::batch_invert(&mut challenges3_inv);
-        let mut challenges2_inv = challenges2.clone();
-        let allinv2 = Scalar::batch_invert(&mut challenges2_inv);
+        let mut challengesG_inv = challengesG.clone();
+        let allinvG = Scalar::batch_invert(&mut challengesG_inv);
+        let mut challengesH_inv = challengesH.clone();
+        let allinvH = Scalar::batch_invert(&mut challengesH_inv);
+        let mut challengesU_inv = challengesU.clone();
+        let allinvU = Scalar::batch_invert(&mut challengesU_inv);
+
+        // all the copying above might be unnecessary. this definitely will hurt performance
+        // is there a way to replace with chained iterators? don't think so but that would 
+        // be nice
 
         // 3. Compute u_i^2 and (1/u_i)^2
 
@@ -342,17 +349,32 @@ impl MatrixFoldingProof {
         let mut s_H = Vec::with_capacity(m*k);
         let mut s_U = Vec::with_capacity(n*k);
 
-        // worked up to here, remaining portion needs to be written (unlike earlier parts, writing this part requires using multiple brain cells)
-        s_1.push(allinv1);
-        for i in 1..n {
+        // compute G scalars (I think this code works fine just ripped straight from original)
+        s_G.push(allinvG);
+        for i in 1..(n*m) {
             let lg_i = (32 - 1 - (i as u32).leading_zeros()) as usize;
-            let k = 1 << lg_i; // bitwise shift for exp
-            // The challenges are stored in "creation order" as [u_k,...,u_1],
-            // so u_{lg(i)+1} = is indexed by (lg_n-1) - lg_i
-            let u_lg_i_sq = challenges_sq[(lg_n - 1) - lg_i];
-            s.push(s[i - k] * u_lg_i_sq);
+            let k = 1 << lg_i; 
+            let x_lg_i = challengesG[(lg_n + lg_m - 1) - lg_i];
+            s_G.push(s_G[i - k] * x_lg_i);
         }
 
+        s_H.push(allinvG);
+        for i in 1..(m*k) {
+            let lg_i = (32 - 1 - (i as u32).leading_zeros()) as usize;
+            let k = 1 << lg_i; 
+            let x_lg_i = challengesH[(lg_m + lg_k - 1) - lg_i];
+            s_H.push(s_H[i - k] * x_lg_i);
+        }
+
+        // TODO figure out how to compute u scalars
+        s_U.push(allinvU); 
+        for i in 1..(m*n) {
+            let lg_i = (32 - 1 - (i as u32).leading_zeros()) as usize;
+            let k = 1 << lg_i;
+            let x_lg_i = challengesU[(lg_n + lg_m - 1) - lg_i];
+            s_U.push(s_U[i - k] * x_lg_i);
+        }
+        // TODO still have to figure out exactly what must be returned...
         Ok((challenges_sq, challenges_inv_sq, s))
     }
 
