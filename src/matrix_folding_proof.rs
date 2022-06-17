@@ -312,7 +312,10 @@ impl MatrixFoldingProof {
             challenges2.push(transcript.challenge_scalar(b"x"));
         }
 
-
+        let mut challengesG = challenges1.clone();
+        challengesG.extend(&challenges2);
+        let mut challengesH = challenges3.clone();
+        challengesH.extend(&challenges2);
         // 2. Compute 1/(u_k...u_1) and 1/u_k, ..., 1/u_1
 
         let mut challenges1_inv = challenges1.clone();
@@ -340,7 +343,7 @@ impl MatrixFoldingProof {
         let mut s_U = Vec::with_capacity(n*k);
 
         // worked up to here, remaining portion needs to be written (unlike earlier parts, writing this part requires using multiple brain cells)
-        s.push(allinv);
+        s_1.push(allinv1);
         for i in 1..n {
             let lg_i = (32 - 1 - (i as u32).leading_zeros()) as usize;
             let k = 1 << lg_i; // bitwise shift for exp
