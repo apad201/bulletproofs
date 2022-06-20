@@ -326,21 +326,12 @@ impl MatrixFoldingGens {
         gens
     }
 
-    /// Returns j-th share of generators, with an appropriate
-    /// slice of vectors G and H for the j-th range proof.
-    pub fn share(&self, j: usize) -> BulletproofGensShare<'_> {
-        BulletproofGensShare {
-            gens: &self,
-            share: j,
-        }
-    }
-
     /// Increases the generators' capacity to the amount specified.
     /// If less than or equal to the current capacity, does nothing.
     pub fn increase_capacity(&mut self, new_n: usize, new_m: usize, new_k: usize) {
         use byteorder::{ByteOrder, LittleEndian};
 
-        if self.gens_capacity >= new_capacity {
+        if self.n >= new_n && self.m >= new_m && self.k >= new_k {
             return;
         }
 
@@ -370,14 +361,14 @@ impl MatrixFoldingGens {
     }
 
     /// Return iterator over G vectors
-    pub(crate) fn G(&self) -> impl Iterator<Item = &'a RistrettoPoint> {
-        self.G_vec.iter().take(self.n * self.m)
+    pub(crate) fn G(&self) -> Vec<RistrettoPoint> {
+        self.G_vec.clone()
     }
-    pub(crate) fn H(&self) -> impl Iterator<Item = &'a RistrettoPoint> {
-        self.H_vec.iter().take(self.m * self.k)
+    pub(crate) fn H(&self) -> Vec<RistrettoPoint> {
+        self.H_vec.clone()
     }
-    pub(crate) fn U(&self) -> impl Iterator<Item = &'a RistrettoPoint> {
-        self.U_vec.iter().take(self.n * self.k)
+    pub(crate) fn U(&self) -> Vec<RistrettoPoint> {
+        self.U_vec.clone()
     }
 }
 

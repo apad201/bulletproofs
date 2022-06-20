@@ -46,6 +46,7 @@ impl MatrixFoldingProof {
         mut U_vec: Vec<RistrettoPoint>, // this used to be Q and was not a vector nor mutable
         mut a_vec: Vec<Scalar>,
         mut b_vec: Vec<Scalar>, // I WILL ASSUME b CONTAINS THE TRANSPOSE OF THE MATRIX B!!!!
+        mut c_vec: Vec<Scalar>,
         mut n: usize, //not sure if these need to be mutable but I'm assuming yes
         mut m: usize,
         mut k: usize
@@ -58,6 +59,8 @@ impl MatrixFoldingProof {
         let mut U = &mut U_vec[..];
         let mut a = &mut a_vec[..];
         let mut b = &mut b_vec[..];
+        let mut c = &mut c_vec[..];
+
 
         let one = Scalar::one();
 
@@ -86,10 +89,6 @@ impl MatrixFoldingProof {
         let mut L_vec2 = Vec::with_capacity(lg_m);
         let mut R_vec2 = Vec::with_capacity(lg_m);
 
-
-        // compute C (or else we'd need to have it passed in as argument)
-        let mut c_vec = mat_mult(a, b, n, k);
-        let mut c = &mut c_vec[..];
 
         // first fold A vertically
         while n != 1 {
@@ -242,7 +241,6 @@ impl MatrixFoldingProof {
             H = H_t;
 
         }
-
         // return value
         // note proof keeps its own record of L and R terms from each iteration, separate from transcript
         MatrixFoldingProof {
@@ -408,7 +406,7 @@ impl MatrixFoldingProof {
     /// method to combine inner product verification with other checks
     /// in a single multiscalar multiplication.
     #[allow(dead_code)]
-    pub fn verify<IG, IH>(
+    pub fn verify(
         &self,
         transcript: &mut Transcript,
         P: &RistrettoPoint,
@@ -418,13 +416,7 @@ impl MatrixFoldingProof {
         n: usize,
         m: usize,
         k: usize
-    ) -> Result<(), ProofError>
-    where
-        IG: IntoIterator,
-        IG::Item: Borrow<Scalar>,
-        IH: IntoIterator,
-        IH::Item: Borrow<Scalar>,
-    {
+    ) -> Result<(), ProofError> {
         let (x1, x3, x2, x1_inv, x3_inv, x2_inv, s_G, s_H, s_U) = self.verification_scalars(n, m, k, transcript)?;
 
         let g_exp = s_G.iter().map(|s_i| self.a * s_i);
@@ -609,116 +601,80 @@ mod tests {
     use crate::util;
     use sha3::Sha3_512;
 
-    fn test_helper_create(n: usize, m: usize, k: usize) {
+    fn mfp_test_helper_create(n: usize, m: usize, k: usize) {
         let mut rng = rand::thread_rng();
 
         use crate::generators::MatrixFoldingGens;
         let mf_gens = MatrixFoldingGens::new(n, m, k);
-        let G: Vec<RistrettoPoint> = mf_gens.G().clone();
-        let H: Vec<RistrettoPoint> = mf_gens.H().clone();
-        let U: Vec<RistrettoPoint> = mf_gens.U().clone();
+        let G: Vec<RistrettoPoint> = mf_gens.G();
+        let H: Vec<RistrettoPoint> = mf_gens.H();
+        let U: Vec<RistrettoPoint> = mf_gens.U();
 
         // a and b are the vectors for which we want to prove c = <a,b>
         let a: Vec<_> = (0..(n*m)).map(|_| Scalar::random(&mut rng)).collect();
         let b: Vec<_> = (0..(m*k)).map(|_| Scalar::random(&mut rng)).collect();
         let c = mat_mult(&a, &b, n, k);
 
-        // P would be determined upstream, but we need a correct P to check the proof.
-        //
-        // To generate P = <a,G> + <b,H'> + <a,b> Q, compute
-        //             P = <a,G> + <b',H> + <a,b> Q,
-        // where b' = b \circ y^(-n)
-        let b_prime = b.iter().zip(util::exp_iter(y_inv)).map(|(bi, yi)| bi * yi);
-        // a.iter() has Item=&Scalar, need Item=Scalar to chain with b_prime
-        let a_prime = a.iter().cloned();
-
         let P = RistrettoPoint::vartime_multiscalar_mul(
-            a_prime.chain(b_prime).chain(iter::once(c)),
-            G.iter().chain(H.iter()).chain(iter::once(&Q)),
+            a.iter()
+                .chain(b.iter())
+                .chain(c.iter()),
+            G.iter()
+                .chain(H.iter())
+                .chain(U.iter())
         );
 
-        let mut verifier = Transcript::new(b"innerproducttest");
+        let mut prover = Transcript::new(b"matrixfoldingtest");
         let proof = MatrixFoldingProof::create(
-            &mut verifier,
-            &Q,
-            &G_factors,
-            &H_factors,
+            &mut prover,
             G.clone(),
             H.clone(),
+            U.clone(),
             a.clone(),
             b.clone(),
+            c.clone(),
+            n,
+            m,
+            k
         );
 
-        let mut verifier = Transcript::new(b"innerproducttest");
-        assert!(proof
-            .verify(
-                n,
-                &mut verifier,
-                iter::repeat(Scalar::one()).take(n),
-                util::exp_iter(y_inv).take(n),
-                &P,
-                &Q,
-                &G,
-                &H
-            )
-            .is_ok());
-
-        let proof = MatrixFoldingProof::from_bytes(proof.to_bytes().as_slice()).unwrap();
-        let mut verifier = Transcript::new(b"innerproducttest");
-        assert!(proof
-            .verify(
-                n,
-                &mut verifier,
-                iter::repeat(Scalar::one()).take(n),
-                util::exp_iter(y_inv).take(n),
-                &P,
-                &Q,
-                &G,
-                &H
-            )
+        let mut verifier = Transcript::new(b"matrixfoldingtest");
+        assert!(proof.verify(
+            &mut verifier,
+            &P,
+            &G[..],
+            &H[..],
+            &U[..],
+            n,
+            m,
+            k
+        )
             .is_ok());
     }
 
     #[test]
-    fn make_ipp_1() {
-        test_helper_create(1);
+    fn make_mfp_1() {
+        mfp_test_helper_create(1, 1, 1);
     }
 
     #[test]
-    fn make_ipp_2() {
-        test_helper_create(2);
+    fn make_mfp_2() {
+        mfp_test_helper_create(2, 2, 2);
     }
 
     #[test]
-    fn make_ipp_4() {
-        test_helper_create(4);
+    fn make_mfp_4() {
+        mfp_test_helper_create(4,8,2);
     }
 
     #[test]
-    fn make_ipp_32() {
-        test_helper_create(32);
+    fn make_mfp_32() {
+        mfp_test_helper_create(5,3,1);
     }
 
     #[test]
-    fn make_ipp_64() {
-        test_helper_create(64);
-    }
-
-    #[test]
-    fn test_inner_product() {
-        let a = vec![
-            Scalar::from(1u64),
-            Scalar::from(2u64),
-            Scalar::from(3u64),
-            Scalar::from(4u64),
-        ];
-        let b = vec![
-            Scalar::from(2u64),
-            Scalar::from(3u64),
-            Scalar::from(4u64),
-            Scalar::from(5u64),
-        ];
-        assert_eq!(Scalar::from(40u64), inner_product(&a, &b));
+    fn make_mfp_64() {
+        mfp_test_helper_create(100,100,100);
     }
 }
 
