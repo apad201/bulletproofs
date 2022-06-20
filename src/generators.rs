@@ -286,6 +286,101 @@ impl<'a> BulletproofGensShare<'a> {
     }
 }
 
+
+pub struct MatrixFoldingGens {
+    /// The maximum number of usable generators for each party.
+    pub n: usize,
+    pub m: usize,
+    pub k: usize,
+    /// Precomputed \\(\mathbf G\\) generators for each party.
+    G_vec: Vec<RistrettoPoint>,
+    /// Precomputed \\(\mathbf H\\) generators for each party.
+    H_vec: Vec<RistrettoPoint>,
+    U_vec: Vec<RistrettoPoint>
+}
+
+
+impl MatrixFoldingGens {
+    /// Create a new `BulletproofGens` object.
+    ///
+    /// # Inputs
+    ///
+    /// * `gens_capacity` is the number of generators to precompute
+    ///    for each party.  For rangeproofs, it is sufficient to pass
+    ///    `64`, the maximum bitsize of the rangeproofs.  For circuit
+    ///    proofs, the capacity must be greater than the number of
+    ///    multipliers, rounded up to the next power of two.
+    ///
+    /// * `party_capacity` is the maximum number of parties that can
+    ///    produce an aggregated proof.
+    pub fn new(new_n: usize, new_m: usize, new_k: usize) -> Self {
+        let mut gens = MatrixFoldingGens {
+            n: 0,
+            m: 0,
+            k: 0,
+            G_vec: Vec::new(),
+            H_vec: Vec::new(),
+            U_vec: Vec::new()
+        };
+        gens.increase_capacity(new_n, new_m, new_k);
+        gens
+    }
+
+    /// Returns j-th share of generators, with an appropriate
+    /// slice of vectors G and H for the j-th range proof.
+    pub fn share(&self, j: usize) -> BulletproofGensShare<'_> {
+        BulletproofGensShare {
+            gens: &self,
+            share: j,
+        }
+    }
+
+    /// Increases the generators' capacity to the amount specified.
+    /// If less than or equal to the current capacity, does nothing.
+    pub fn increase_capacity(&mut self, new_n: usize, new_m: usize, new_k: usize) {
+        use byteorder::{ByteOrder, LittleEndian};
+
+        if self.gens_capacity >= new_capacity {
+            return;
+        }
+
+        let mut label = [b'G'];
+        self.G_vec.extend(
+            &mut GeneratorsChain::new(&label)
+                .fast_forward(self.n * self.m)
+                .take((new_n * new_m) - (self.n * self.m)),
+        );
+
+        label[0] = b'H';
+        self.H_vec.extend(
+            &mut GeneratorsChain::new(&label)
+                .fast_forward(self.m * self.k)
+                .take((new_m * new_k) - (self.m * self.k)),
+        );
+
+        label[0] = b'U';
+        self.U_vec.extend(
+            &mut GeneratorsChain::new(&label)
+                .fast_forward(self.n * self.k)
+                .take((new_n * new_k) - (self.n * self.k)),
+        );
+        self.n = new_n;
+        self.m = new_m;
+        self.k = new_k;
+    }
+
+    /// Return iterator over G vectors
+    pub(crate) fn G(&self) -> impl Iterator<Item = &'a RistrettoPoint> {
+        self.G_vec.iter().take(self.n * self.m)
+    }
+    pub(crate) fn H(&self) -> impl Iterator<Item = &'a RistrettoPoint> {
+        self.H_vec.iter().take(self.m * self.k)
+    }
+    pub(crate) fn U(&self) -> impl Iterator<Item = &'a RistrettoPoint> {
+        self.U_vec.iter().take(self.n * self.k)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

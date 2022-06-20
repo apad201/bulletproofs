@@ -602,34 +602,26 @@ pub fn inner_product(a: &[Scalar], b: &[Scalar]) -> Scalar {
     out
 }
 
-/*#[cfg(test)]
+#[cfg(test)]
 mod tests {
     use super::*;
 
     use crate::util;
     use sha3::Sha3_512;
 
-    fn test_helper_create(n: usize) {
+    fn test_helper_create(n: usize, m: usize, k: usize) {
         let mut rng = rand::thread_rng();
 
-        use crate::generators::BulletproofGens;
-        let bp_gens = BulletproofGens::new(n, 1);
-        let G: Vec<RistrettoPoint> = bp_gens.share(0).G(n).cloned().collect();
-        let H: Vec<RistrettoPoint> = bp_gens.share(0).H(n).cloned().collect();
-
-        // Q would be determined upstream in the protocol, so we pick a random one.
-        let Q = RistrettoPoint::hash_from_bytes::<Sha3_512>(b"test point");
+        use crate::generators::MatrixFoldingGens;
+        let mf_gens = MatrixFoldingGens::new(n, m, k);
+        let G: Vec<RistrettoPoint> = mf_gens.G().clone();
+        let H: Vec<RistrettoPoint> = mf_gens.H().clone();
+        let U: Vec<RistrettoPoint> = mf_gens.U().clone();
 
         // a and b are the vectors for which we want to prove c = <a,b>
-        let a: Vec<_> = (0..n).map(|_| Scalar::random(&mut rng)).collect();
-        let b: Vec<_> = (0..n).map(|_| Scalar::random(&mut rng)).collect();
-        let c = inner_product(&a, &b);
-
-        let G_factors: Vec<Scalar> = iter::repeat(Scalar::one()).take(n).collect();
-
-        // y_inv is (the inverse of) a random challenge
-        let y_inv = Scalar::random(&mut rng);
-        let H_factors: Vec<Scalar> = util::exp_iter(y_inv).take(n).collect();
+        let a: Vec<_> = (0..(n*m)).map(|_| Scalar::random(&mut rng)).collect();
+        let b: Vec<_> = (0..(m*k)).map(|_| Scalar::random(&mut rng)).collect();
+        let c = mat_mult(&a, &b, n, k);
 
         // P would be determined upstream, but we need a correct P to check the proof.
         //
@@ -729,4 +721,4 @@ mod tests {
         assert_eq!(Scalar::from(40u64), inner_product(&a, &b));
     }
 }
-*/
+
