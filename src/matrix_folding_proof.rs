@@ -391,7 +391,7 @@ impl MatrixFoldingProof {
         }
 
         s_U.push(s_U0); 
-        for i in 1..(m*n) {
+        for i in 1..(n*k) {
             let lg_i = (32 - 1 - (i as u32).leading_zeros()) as usize;
             let k = 1 << lg_i;
             let x_lg_i = challengesU[(lg_n + lg_m - 1) - lg_i];
