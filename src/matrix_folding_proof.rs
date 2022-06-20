@@ -25,6 +25,10 @@ pub struct MatrixFoldingProof {
     pub(crate) R_vec2: Vec<CompressedRistretto>,
     pub(crate) a: Scalar,
     pub(crate) b: Scalar,
+    pub(crate) TESTx: Vec<Scalar>,
+    pub(crate) TESTGf: RistrettoPoint,
+    pub(crate) TESTHf: RistrettoPoint,
+    pub(crate) TESTUf: RistrettoPoint,
 }
 
 impl MatrixFoldingProof {
@@ -89,7 +93,7 @@ impl MatrixFoldingProof {
         let mut L_vec2 = Vec::with_capacity(lg_m);
         let mut R_vec2 = Vec::with_capacity(lg_m);
 
-
+        let mut TESTchall = Vec::with_capacity(lg_n + lg_m + lg_k);
         // first fold A vertically
         while n != 1 {
             // fold A and G vertically
@@ -121,7 +125,7 @@ impl MatrixFoldingProof {
             // get challenge and its inverse
             let x = transcript.challenge_scalar(b"x");
             let x_inv = x.invert();
-
+            TESTchall.push(x);
             // compute a', G'
             for i in 1..(n*m) {
                 a_t[i] = x * a_t[i] + a_b[i];
@@ -175,6 +179,7 @@ impl MatrixFoldingProof {
             // get challenge and its inverse
             let x = transcript.challenge_scalar(b"x");
             let x_inv = x.invert();
+            TESTchall.push(x);
 
             for i in 1..(m*k) {
                 b_l[i] = x * b_l[i] + b_r[i];
@@ -227,6 +232,7 @@ impl MatrixFoldingProof {
              // get challenge and its inverse
             let x = transcript.challenge_scalar(b"x");
             let x_inv = x.invert();
+            TESTchall.push(x);
 
             for i in 1..m {
                 a_l[i] = x * a_l[i] + a_r[i];
@@ -252,6 +258,10 @@ impl MatrixFoldingProof {
             R_vec2: R_vec2,
             a: a[0],
             b: b[0],
+            TESTx: TESTchall,
+            TESTGf: G[0],
+            TESTHf: H[0],
+            TESTUf: U[0]
         }
     }
 
@@ -308,6 +318,10 @@ impl MatrixFoldingProof {
             transcript.validate_and_append_point(b"R", R)?;
             challenges2.push(transcript.challenge_scalar(b"x"));
         }
+        let mut TESTchall = challenges1.clone();
+        TESTchall.extend(&challenges3);
+        TESTchall.extend(&challenges2);
+        assert_eq!(TESTchall, self.TESTx);
         /* 
         let mut challengesG = challenges1.clone();
         challengesG.extend(&challenges2);
@@ -377,26 +391,27 @@ impl MatrixFoldingProof {
         s_G.push(s_G0);
         for i in 1..(n*m) {
             let lg_i = (32 - 1 - (i as u32).leading_zeros()) as usize;
-            let k = 1 << lg_i; 
+            let b = 1 << lg_i; 
             let x_lg_i = challengesG[(lg_n + lg_m - 1) - lg_i];
-            s_G.push(s_G[i - k] * x_lg_i);
+            s_G.push(s_G[i - b] * x_lg_i);
         }
 
         s_H.push(s_H0);
         for i in 1..(m*k) {
             let lg_i = (32 - 1 - (i as u32).leading_zeros()) as usize;
-            let k = 1 << lg_i; 
+            let b = 1 << lg_i; 
             let x_lg_i = challengesH[(lg_m + lg_k - 1) - lg_i];
-            s_H.push(s_H[i - k] * x_lg_i);
+            s_H.push(s_H[i - b] * x_lg_i);
         }
 
         s_U.push(s_U0); 
         for i in 1..(n*k) {
             let lg_i = (32 - 1 - (i as u32).leading_zeros()) as usize;
-            let k = 1 << lg_i;
+            let b = 1 << lg_i;
             let x_lg_i = challengesU[(lg_n + lg_m - 1) - lg_i];
-            s_U.push(s_U[i - k] * x_lg_i);
+            s_U.push(s_U[i - b] * x_lg_i);
         }
+
         // TODO still have to figure out exactly what must be returned...
         Ok((challenges1, challenges3, challenges2, challenges1_inv, challenges3_inv, challenges2_inv, s_G, s_H, s_U))
     }
@@ -418,6 +433,10 @@ impl MatrixFoldingProof {
         k: usize
     ) -> Result<(), ProofError> {
         let (x1, x3, x2, x1_inv, x3_inv, x2_inv, s_G, s_H, s_U) = self.verification_scalars(n, m, k, transcript)?;
+
+        let TESTG = RistrettoPoint::vartime_multiscalar_mul(s_G.iter(), G.iter());
+        assert_eq!(TESTG, self.TESTGf);
+
 
         let g_exp = s_G.iter().map(|s_i| self.a * s_i);
         let h_exp = s_H.iter().map(|s_i| self.b * s_i);
