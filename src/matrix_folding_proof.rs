@@ -127,13 +127,13 @@ impl MatrixFoldingProof {
             let x_inv = x.invert();
             TESTchall.push(x);
             // compute a', G'
-            for i in 1..(n*m) {
+            for i in 0..(n*m) {
                 a_t[i] = x * a_t[i] + a_b[i];
                 G_t[i] = RistrettoPoint::vartime_multiscalar_mul(&[x_inv, one], &[G_t[i], G_b[i]]);
             }
 
             // compute c', U'
-            for i in 1..(n*k) {
+            for i in 0..(n*k) {
                 c_t[i] = x * c_t[i] + c_b[i];
                 U_t[i] = RistrettoPoint::vartime_multiscalar_mul(&[x_inv, one], &[U_t[i], U_b[i]]);
             }
@@ -181,12 +181,12 @@ impl MatrixFoldingProof {
             let x_inv = x.invert();
             TESTchall.push(x);
 
-            for i in 1..(m*k) {
+            for i in 0..(m*k) {
                 b_l[i] = x * b_l[i] + b_r[i];
                 H_l[i] = RistrettoPoint::vartime_multiscalar_mul(&[x_inv, one], &[H_l[i], H_r[i]]);
             }
 
-            for i in 1..k {
+            for i in 0..k {
                 c_l[i] = x * c_l[i] + c_r[i];
                 U_l[i] = RistrettoPoint::vartime_multiscalar_mul(&[x_inv, one], &[U_l[i], U_r[i]]);
             }
@@ -234,7 +234,7 @@ impl MatrixFoldingProof {
             let x_inv = x.invert();
             TESTchall.push(x);
 
-            for i in 1..m {
+            for i in 0..m {
                 a_l[i] = x * a_l[i] + a_r[i];
                 b_t[i] = x_inv * b_t[i] + b_b[i];
                 G_l[i] = RistrettoPoint::vartime_multiscalar_mul(&[x_inv, one], &[G_l[i], G_r[i]]);
@@ -408,10 +408,11 @@ impl MatrixFoldingProof {
         for i in 1..(n*k) {
             let lg_i = (32 - 1 - (i as u32).leading_zeros()) as usize;
             let b = 1 << lg_i;
-            let x_lg_i = challengesU[(lg_n + lg_m - 1) - lg_i];
+            let x_lg_i = challengesU[(lg_n + lg_k - 1) - lg_i];
             s_U.push(s_U[i - b] * x_lg_i);
         }
-
+        //assert_eq!(s_G[n*m - 1], Scalar::one());
+        //assert_eq!(s_G[0], challenges1_inv[0]);
         // TODO still have to figure out exactly what must be returned...
         Ok((challenges1, challenges3, challenges2, challenges1_inv, challenges3_inv, challenges2_inv, s_G, s_H, s_U))
     }
@@ -436,7 +437,10 @@ impl MatrixFoldingProof {
 
         let TESTG = RistrettoPoint::vartime_multiscalar_mul(s_G.iter(), G.iter());
         assert_eq!(TESTG, self.TESTGf);
-
+        let TESTH = RistrettoPoint::vartime_multiscalar_mul(s_H.iter(), H.iter());
+        assert_eq!(TESTH, self.TESTHf);
+        let TESTU = RistrettoPoint::vartime_multiscalar_mul(s_U.iter(), U.iter());
+        assert_eq!(TESTU, self.TESTUf);
 
         let g_exp = s_G.iter().map(|s_i| self.a * s_i);
         let h_exp = s_H.iter().map(|s_i| self.b * s_i);
@@ -452,13 +456,20 @@ impl MatrixFoldingProof {
             .chain(x2_inv.iter())
             .map(|xi| -xi);
 
+        for (val1, val2) in neg_x.clone().zip(neg_x_inv.clone()) {
+            assert_eq!(val1 * val2, Scalar::one());
+        }
+        for (val1, val2) in neg_x.clone().zip(x1.iter().chain(x3.iter().chain(x2.iter()))) {
+            assert_eq!(val1 + val2, Scalar::zero());
+        }
+
         let Ls = self
             .L_vec1
             .iter()
             .chain(self.L_vec3
-            .iter())
+            .iter()
             .chain(self.L_vec2
-            .iter())
+            .iter()))
             .map(|p| p.decompress().ok_or(ProofError::VerificationError))
             .collect::<Result<Vec<_>, _>>()?;
 
@@ -466,9 +477,9 @@ impl MatrixFoldingProof {
             .R_vec1
             .iter()
             .chain(self.R_vec3
-            .iter())
+            .iter()
             .chain(self.R_vec2
-            .iter())
+            .iter()))
             .map(|p| p.decompress().ok_or(ProofError::VerificationError))
             .collect::<Result<Vec<_>, _>>()?;
 
@@ -613,12 +624,11 @@ pub fn inner_product(a: &[Scalar], b: &[Scalar]) -> Scalar {
     out
 }
 
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    use crate::util;
-    use sha3::Sha3_512;
 
     fn mfp_test_helper_create(n: usize, m: usize, k: usize) {
         let mut rng = rand::thread_rng();
@@ -678,7 +688,7 @@ mod tests {
 
     #[test]
     fn make_mfp_2() {
-        mfp_test_helper_create(2, 2, 2);
+        mfp_test_helper_create(16, 1, 8);
     }
 
     #[test]
@@ -695,5 +705,17 @@ mod tests {
     fn make_mfp_64() {
         mfp_test_helper_create(100,100,100);
     }
+
+    #[test]
+    fn test_mat_mult() {
+        let a = vec![Scalar::one(), Scalar::zero(), Scalar::zero(), Scalar::one()];
+        let b = vec![Scalar::one() + Scalar::one(), Scalar::one(), Scalar::one() + Scalar::one() + Scalar::one(),Scalar::one()];
+        let c = mat_mult(&a, &b, 2, 2);
+        let c0 = c[0];
+        let c1 = c[1];
+        let c2 = c[2];
+        let c3 = c[3];
+        let test = 3;
+;    }
 }
 
