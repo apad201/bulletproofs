@@ -1,6 +1,6 @@
 //! The `generators` module contains API for producing a
 //! set of generators for a rangeproof.
-
+#![allow(dead_code)]
 #![allow(non_snake_case)]
 #![deny(missing_docs)]
 
@@ -329,7 +329,6 @@ impl MatrixFoldingGens {
     /// Increases the generators' capacity to the amount specified.
     /// If less than or equal to the current capacity, does nothing.
     pub fn increase_capacity(&mut self, new_n: usize, new_m: usize, new_k: usize) {
-        use byteorder::{ByteOrder, LittleEndian};
 
         if self.n >= new_n && self.m >= new_m && self.k >= new_k {
             return;
@@ -360,7 +359,7 @@ impl MatrixFoldingGens {
         self.k = new_k;
     }
 
-    /// Return iterator over G vectors
+    /// Return G vectors
     pub(crate) fn G(&self) -> Vec<RistrettoPoint> {
         self.G_vec.clone()
     }

@@ -3,7 +3,6 @@
 #![cfg_attr(feature = "docs", doc(include = "../docs/inner-product-protocol.md"))]
 extern crate alloc;
 
-use alloc::borrow::Borrow;
 use alloc::vec::Vec;
 
 use core::iter;
@@ -25,6 +24,8 @@ pub struct MatrixFoldingProof {
     pub(crate) R_vec2: Vec<CompressedRistretto>,
     pub(crate) a: Scalar,
     pub(crate) b: Scalar,
+
+    // These are for debugging purposes only, will be removed lated
     pub(crate) TESTx: Vec<Scalar>,
     pub(crate) TESTGf: RistrettoPoint,
     pub(crate) TESTHf: RistrettoPoint,
@@ -80,12 +81,16 @@ impl MatrixFoldingProof {
         assert!(m.is_power_of_two());
         assert!(k.is_power_of_two());
 
+        // begin the transcript
         transcript.matrixfolding_domain_sep(n as u64, m as u64, k as u64); 
 
         let lg_n = n.next_power_of_two().trailing_zeros() as usize;
         let lg_m = m.next_power_of_two().trailing_zeros() as usize; 
         let lg_k = k.next_power_of_two().trailing_zeros() as usize;
         
+        // create vectors for L and R values
+        // 1 vecs are for folding A and C, 3 vecs for folding B and C, 2 vecs for folding A and B
+        // will be used in order 1 -> 3 -> 2 to avoid taking transposes
         let mut L_vec1 = Vec::with_capacity(lg_n);
         let mut R_vec1 = Vec::with_capacity(lg_n);
         let mut L_vec3 = Vec::with_capacity(lg_k);
@@ -93,7 +98,11 @@ impl MatrixFoldingProof {
         let mut L_vec2 = Vec::with_capacity(lg_m);
         let mut R_vec2 = Vec::with_capacity(lg_m);
 
+        // Debugging: store challenges explicitly so we can check to be sure challenges
+        // are recovered properly in verification.
+        // Obviously this will NOT be part of the actual protocol
         let mut TESTchall = Vec::with_capacity(lg_n + lg_m + lg_k);
+
         // first fold A vertically
         while n != 1 {
             // fold A and G vertically
@@ -125,6 +134,7 @@ impl MatrixFoldingProof {
             // get challenge and its inverse
             let x = transcript.challenge_scalar(b"x");
             let x_inv = x.invert();
+            // for debugging: add challenge to record
             TESTchall.push(x);
             // compute a', G'
             for i in 0..(n*m) {
@@ -150,6 +160,8 @@ impl MatrixFoldingProof {
         // Technically we need to find transpose of C (since it must also be folded horizontally), 
         // but since A is now a row vector, C is a row vector, so we can just
         // "re-interpret" it as a column vector and no actual work is needed to transpose it! which is very nice
+        // confirm that n=1 by this point:
+        assert_eq!(n,1);
         while k != 1 {
             k = k/2;
             let (b_l, b_r) = b.split_at_mut(m*k);
@@ -181,6 +193,7 @@ impl MatrixFoldingProof {
             let x_inv = x.invert();
             TESTchall.push(x);
 
+            // compute new b', H', c', U'
             for i in 0..(m*k) {
                 b_l[i] = x * b_l[i] + b_r[i];
                 H_l[i] = RistrettoPoint::vartime_multiscalar_mul(&[x_inv, one], &[H_l[i], H_r[i]]);
@@ -200,6 +213,9 @@ impl MatrixFoldingProof {
         // now a is 1 x m and b is m x 1 and c is 1 x 1. 
         // because b stores B^T, which is a row vector, which we can reinterpret as the column vector B! yay
         // at this point it is just an inner product proof
+        // to confirm that folding in other dimensions is done:
+        assert_eq!(k,1);
+        assert_eq!(n,1);
 
         while m != 1 {
             m = m/2;
@@ -208,6 +224,7 @@ impl MatrixFoldingProof {
             let (G_l, G_r) = G.split_at_mut(m);
             let (H_t, H_b) = H.split_at_mut(m);
 
+            // this time we need values of cross terms for L and R
             let c_l = inner_product(a_l, b_b);
             let c_r = inner_product(a_r, b_t);
 
@@ -258,6 +275,8 @@ impl MatrixFoldingProof {
             R_vec2: R_vec2,
             a: a[0],
             b: b[0],
+
+            // fields below will be removed, for debugging only
             TESTx: TESTchall,
             TESTGf: G[0],
             TESTHf: H[0],
@@ -297,7 +316,7 @@ impl MatrixFoldingProof {
 
         transcript.matrixfolding_domain_sep(n as u64, m as u64, k as u64);
 
-        // 1. Recompute x_k,...,x_1 based on the proof transcript
+        // 1. Recompute challenges based on the proof transcript
 
         let mut challenges1 = Vec::with_capacity(lg_n);
         let mut challenges3 = Vec::with_capacity(lg_k);
@@ -318,32 +337,14 @@ impl MatrixFoldingProof {
             transcript.validate_and_append_point(b"R", R)?;
             challenges2.push(transcript.challenge_scalar(b"x"));
         }
+
+        // Some debugging tests: ensure that challenges were correctly recovered
         let mut TESTchall = challenges1.clone();
         TESTchall.extend(&challenges3);
         TESTchall.extend(&challenges2);
         assert_eq!(TESTchall, self.TESTx);
-        /* 
-        let mut challengesG = challenges1.clone();
-        challengesG.extend(&challenges2);
-        let mut challengesH = challenges3.clone();
-        challengesH.extend(&challenges2);
-        let mut challengesU = challenges1.clone();
-        challengesU.extend(&challenges3);
 
-        // 2. Compute 1/(u_k...u_1) and 1/u_k, ..., 1/u_1
-        
-        let mut challengesG_inv = challengesG.clone();
-        let allinvG = Scalar::batch_invert(&mut challengesG_inv);
-        let mut challengesH_inv = challengesH.clone();
-        let allinvH = Scalar::batch_invert(&mut challengesH_inv);
-        let mut challengesU_inv = challengesU.clone();
-        let allinvU = Scalar::batch_invert(&mut challengesU_inv);
-
-        let mut challenges_inv = challenges1.clone();
-        challenges_inv.extend(&challenges3);
-        challenges_inv.extend(&challenges2);
-        let allinv = Scalar::batch_invert(&mut challenges_inv);
-        */
+        // Need various mixes of challenges & their inverses to begin computing s-vectors
         let mut challenges1_inv = challenges1.clone();
         let allinv1 = Scalar::batch_invert(&mut challenges1_inv);
         let mut challenges2_inv = challenges2.clone();
@@ -370,19 +371,7 @@ impl MatrixFoldingProof {
         // is there a way to replace with chained iterators? don't think so but that would 
         // be nice
 
-        // 3. Compute u_i^2 and (1/u_i)^2
-
-        /* WE DON'T NEED SQUARES because we made better choices
-        for i in 0..lg_n {
-            // XXX missing square fn upstream
-            challenges[i] = challenges[i] * challenges[i];
-            challenges_inv[i] = challenges_inv[i] * challenges_inv[i];
-        }
-        let challenges_sq = challenges;
-        let challenges_inv_sq = challenges_inv;
-        */
-        // 4. Compute s values inductively.
-
+        // Compute s values inductively.
         let mut s_G = Vec::with_capacity(n*m);
         let mut s_H = Vec::with_capacity(m*k);
         let mut s_U = Vec::with_capacity(n*k);
@@ -413,7 +402,6 @@ impl MatrixFoldingProof {
         }
         //assert_eq!(s_G[n*m - 1], Scalar::one());
         //assert_eq!(s_G[0], challenges1_inv[0]);
-        // TODO still have to figure out exactly what must be returned...
         Ok((challenges1, challenges3, challenges2, challenges1_inv, challenges3_inv, challenges2_inv, s_G, s_H, s_U))
     }
 
@@ -433,8 +421,12 @@ impl MatrixFoldingProof {
         m: usize,
         k: usize
     ) -> Result<(), ProofError> {
+        // get verification scalars
         let (x1, x3, x2, x1_inv, x3_inv, x2_inv, s_G, s_H, s_U) = self.verification_scalars(n, m, k, transcript)?;
 
+        // Debugging tests: confirms that all of the s-vectors were computed correctly.
+        // Also guarantees that folded G, H, and U group elements were computed correctly
+        // during proof generation
         let TESTG = RistrettoPoint::vartime_multiscalar_mul(s_G.iter(), G.iter());
         assert_eq!(TESTG, self.TESTGf);
         let TESTH = RistrettoPoint::vartime_multiscalar_mul(s_H.iter(), H.iter());
@@ -442,11 +434,18 @@ impl MatrixFoldingProof {
         let TESTU = RistrettoPoint::vartime_multiscalar_mul(s_U.iter(), U.iter());
         assert_eq!(TESTU, self.TESTUf);
 
+        // compute remaining exponents for verification equation (for G and H and U terms)
         let g_exp = s_G.iter().map(|s_i| self.a * s_i);
         let h_exp = s_H.iter().map(|s_i| self.b * s_i);
         let c = self.a * self.b;
         let u_exp = s_U.iter().map(|s_i| c * s_i);
 
+        // Debugging tests: ensures above computations worked as expected
+        let H_EXPED = RistrettoPoint::vartime_multiscalar_mul(h_exp.clone(), H.iter());
+        let Hf_EXPED = RistrettoPoint::vartime_multiscalar_mul(iter::once(&self.b), iter::once(self.TESTHf));
+        assert_eq!(H_EXPED, Hf_EXPED);
+
+        // Compute more verification exponents (here for L and R terms)
         let neg_x = x1.iter()
             .chain(x3.iter())
             .chain(x2.iter())
@@ -456,6 +455,7 @@ impl MatrixFoldingProof {
             .chain(x2_inv.iter())
             .map(|xi| -xi);
 
+        // Debugging tests: confirm L and R exponents agree with outputs from verification_scalars fn
         for (val1, val2) in neg_x.clone().zip(neg_x_inv.clone()) {
             assert_eq!(val1 * val2, Scalar::one());
         }
@@ -463,6 +463,7 @@ impl MatrixFoldingProof {
             assert_eq!(val1 + val2, Scalar::zero());
         }
 
+        // Get L and R values from proof
         let Ls = self
             .L_vec1
             .iter()
@@ -483,6 +484,7 @@ impl MatrixFoldingProof {
             .map(|p| p.decompress().ok_or(ProofError::VerificationError))
             .collect::<Result<Vec<_>, _>>()?;
 
+        // Compute the verification eqn
         let expect_P = RistrettoPoint::vartime_multiscalar_mul(
             g_exp
                 .chain(h_exp)
@@ -496,6 +498,7 @@ impl MatrixFoldingProof {
                 .chain(Rs.iter())
         );
 
+        // See if verification passes
         if expect_P == *P {
             Ok(())
         } else {
@@ -624,7 +627,7 @@ pub fn inner_product(a: &[Scalar], b: &[Scalar]) -> Scalar {
     out
 }
 
-
+// below are the debugging tests
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -633,17 +636,26 @@ mod tests {
     fn mfp_test_helper_create(n: usize, m: usize, k: usize) {
         let mut rng = rand::thread_rng();
 
+        // get group elements. See generators.rs file for how this works; I basically copied
+        // the way the bp_gens worked and just added more for U and removed the aggregation
+        // since we aren't working with that
         use crate::generators::MatrixFoldingGens;
         let mf_gens = MatrixFoldingGens::new(n, m, k);
         let G: Vec<RistrettoPoint> = mf_gens.G();
         let H: Vec<RistrettoPoint> = mf_gens.H();
         let U: Vec<RistrettoPoint> = mf_gens.U();
 
-        // a and b are the vectors for which we want to prove c = <a,b>
+        // a and b are the matrices for which we want to prove c=ab
         let a: Vec<_> = (0..(n*m)).map(|_| Scalar::random(&mut rng)).collect();
         let b: Vec<_> = (0..(m*k)).map(|_| Scalar::random(&mut rng)).collect();
         let c = mat_mult(&a, &b, n, k);
 
+        // debugging check: be sure matrix multiplication matches inner product if applicable
+        if n == 1 && k == 1 {
+            assert_eq!(c[0], inner_product(&a, &b));
+        }
+
+        // Compute commitment P
         let P = RistrettoPoint::vartime_multiscalar_mul(
             a.iter()
                 .chain(b.iter())
@@ -653,6 +665,7 @@ mod tests {
                 .chain(U.iter())
         );
 
+        // generate proof
         let mut prover = Transcript::new(b"matrixfoldingtest");
         let proof = MatrixFoldingProof::create(
             &mut prover,
@@ -667,6 +680,7 @@ mod tests {
             k
         );
 
+        // verify proof
         let mut verifier = Transcript::new(b"matrixfoldingtest");
         assert!(proof.verify(
             &mut verifier,
@@ -681,6 +695,7 @@ mod tests {
             .is_ok());
     }
 
+    // test cases: currently tests 1-5 pass and 6-9 fail (fails whenever m \neq 1)
     #[test]
     fn make_mfp_1() {
         mfp_test_helper_create(1, 1, 1);
@@ -688,22 +703,42 @@ mod tests {
 
     #[test]
     fn make_mfp_2() {
-        mfp_test_helper_create(16, 1, 8);
+        mfp_test_helper_create(16, 1, 1);
+    }
+
+    #[test]
+    fn make_mfp_3() {
+        mfp_test_helper_create(1,1,16);
     }
 
     #[test]
     fn make_mfp_4() {
-        mfp_test_helper_create(4,8,2);
+        mfp_test_helper_create(16,1,16);
     }
 
     #[test]
-    fn make_mfp_32() {
-        mfp_test_helper_create(5,3,1);
+    fn make_mfp_5() {
+        mfp_test_helper_create(16,1,32);
     }
 
     #[test]
-    fn make_mfp_64() {
-        mfp_test_helper_create(100,100,100);
+    fn make_mfp_6() {
+        mfp_test_helper_create(1,16,1);
+    }
+
+    #[test]
+    fn make_mfp_7() {
+        mfp_test_helper_create(8,16,1);
+    }
+
+    #[test]
+    fn make_mfp_8() {
+        mfp_test_helper_create(1,16,8);
+    }
+
+    #[test]
+    fn make_mfp_9() {
+        mfp_test_helper_create(32,4,8);
     }
 
     #[test]
@@ -711,11 +746,11 @@ mod tests {
         let a = vec![Scalar::one(), Scalar::zero(), Scalar::zero(), Scalar::one()];
         let b = vec![Scalar::one() + Scalar::one(), Scalar::one(), Scalar::one() + Scalar::one() + Scalar::one(),Scalar::one()];
         let c = mat_mult(&a, &b, 2, 2);
-        let c0 = c[0];
-        let c1 = c[1];
-        let c2 = c[2];
-        let c3 = c[3];
-        let test = 3;
-;    }
+        let _c0 = c[0];
+        let _c1 = c[1];
+        let _c2 = c[2];
+        let _c3 = c[3];
+        let _test = 3;
+    }
 }
 
