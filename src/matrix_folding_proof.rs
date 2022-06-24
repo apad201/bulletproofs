@@ -646,6 +646,7 @@ mod tests {
         let U: Vec<RistrettoPoint> = mf_gens.U();
 
         // a and b are the matrices for which we want to prove c=ab
+        // just generate random matrices every time
         let a: Vec<_> = (0..(n*m)).map(|_| Scalar::random(&mut rng)).collect();
         let b: Vec<_> = (0..(m*k)).map(|_| Scalar::random(&mut rng)).collect();
         let c = mat_mult(&a, &b, n, k);
