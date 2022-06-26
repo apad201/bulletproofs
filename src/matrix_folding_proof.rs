@@ -71,6 +71,7 @@ impl MatrixFoldingProof {
         assert_eq!(U.len(), n*k);
         assert_eq!(a.len(), n*m);
         assert_eq!(b.len(), m*k);
+        assert_eq!(c.len(), n*k);
 
         // All of the input vectors must have a length that is a power of two.
         assert!(n.is_power_of_two());
