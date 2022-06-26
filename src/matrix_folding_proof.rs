@@ -216,7 +216,7 @@ impl MatrixFoldingProof {
         // to confirm that folding in other dimensions is done:
         assert_eq!(k,1);
         assert_eq!(n,1);
-
+        assert_eq!(U.len(),1);
         while m != 1 {
             m = m/2;
             let (a_l, a_r) = a.split_at_mut(m);
@@ -229,13 +229,13 @@ impl MatrixFoldingProof {
             let c_r = inner_product(a_r, b_t);
 
             let L = RistrettoPoint::vartime_multiscalar_mul(
-                a_l.iter().chain(b_t.iter().chain(iter::once(&c_l))), 
-                G_r.iter().chain(H_b.iter().chain(U.iter()))
+                a_l.iter().chain(b_b.iter().chain(iter::once(&c_l))), 
+                G_r.iter().chain(H_t.iter().chain(U.iter()))
             ).compress(); // at this point U should have length 1
 
             let R = RistrettoPoint::vartime_multiscalar_mul(
-                a_r.iter().chain(b_b.iter().chain(iter::once(&c_r))), 
-                G_l.iter().chain(H_t.iter().chain(U.iter()))
+                a_r.iter().chain(b_t.iter().chain(iter::once(&c_r))), 
+                G_l.iter().chain(H_b.iter().chain(U.iter()))
             ).compress();
 
              // add L R to records for return struct
