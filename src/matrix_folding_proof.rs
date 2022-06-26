@@ -601,11 +601,7 @@ fn mat_mult(a: &[Scalar], b: &[Scalar], n: usize, k: usize) -> Vec<Scalar> {
     assert_eq!(m, b.len()/k);
     for a_row in a.chunks(m) {
         for b_col in b.chunks(m) {
-            let mut val = Scalar::zero();
-            for i in 0..m {
-                val += a_row[i] * b_col[i];
-            }
-            c.push(val);
+            c.push(inner_product(a_row,b_col));
         }
     }
     c
@@ -752,6 +748,64 @@ mod tests {
         let _c2 = c[2];
         let _c3 = c[3];
         let _test = 3;
+    }
+
+    fn mat_mult_test_helper(n: usize, m: usize, k: usize) {
+        let mut rng = rand::thread_rng();
+        let a: Vec<_> = (0..(n*m)).map(|_| Scalar::random(&mut rng)).collect();
+        let b: Vec<_> = (0..(m*k)).map(|_| Scalar::random(&mut rng)).collect();
+        let c = mat_mult(&a, &b, n, k);
+        
+        for x in 0..n {
+            for y in 0..k {
+                assert_eq!(inner_product(&a[x*m..(x+1)*m], &b[y*m..(y+1)*m]), c[k*x + y]);
+            }
+        }
+    }
+
+    #[test]
+    fn mm_test_1() {
+        mat_mult_test_helper(1, 1, 1);
+    }
+
+    #[test]
+    fn mm_test_2() {
+        mat_mult_test_helper(16,1,1);
+    }
+
+    #[test]
+    fn mm_test_3() {
+        mat_mult_test_helper(1,1,16);
+    }
+
+    #[test]
+    fn mm_test_4() {
+        mat_mult_test_helper(16,1,16);
+    }
+
+    #[test]
+    fn mm_test_5() {
+        mat_mult_test_helper(1,16,1);
+    }
+
+    #[test]
+    fn mm_test_6() {
+        mat_mult_test_helper(16,32,1);
+    }
+
+    #[test]
+    fn mm_test_7() {
+        mat_mult_test_helper(1,32,16);
+    }
+
+    #[test]
+    fn mm_test_8() {
+        mat_mult_test_helper(64,32,16);
+    }
+
+    #[test]
+    fn mm_test_9() {
+        mat_mult_test_helper(2,2,2);
     }
 }
 
