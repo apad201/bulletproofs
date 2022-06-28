@@ -539,6 +539,8 @@ pub fn inner_product(a: &[Scalar], b: &[Scalar]) -> Scalar {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Instant;
+
 
 
     fn mfp_test_helper_create(n: usize, m: usize, k: usize) {
@@ -650,6 +652,11 @@ mod tests {
         mfp_test_helper_create(32,4,8);
     }
 
+    #[test]
+    fn make_mfp_time_1() {
+        mfp_test_helper_create(1024,2048,512);
+    }
+
     fn mat_mult_test_helper(n: usize, m: usize, k: usize) {
         let mut rng = rand::thread_rng();
         let a: Vec<_> = (0..(n*m)).map(|_| Scalar::random(&mut rng)).collect();
@@ -707,5 +714,115 @@ mod tests {
     fn mm_test_9() {
         mat_mult_test_helper(2,2,2);
     }
+
+
+    fn mfp_timing_setup(n: usize, m: usize, k: usize) -> (Vec<RistrettoPoint>, Vec<RistrettoPoint>, Vec<RistrettoPoint>, Vec<Scalar>, Vec<Scalar>, Vec<Scalar>) {
+        let mut rng = rand::thread_rng();
+
+        // get group elements. See generators.rs file for how this works; I basically copied
+        // the way the bp_gens worked and just added more for U and removed the aggregation
+        // since we aren't working with that
+        use crate::generators::MatrixFoldingGens;
+        let mf_gens = MatrixFoldingGens::new(n, m, k);
+        let G: Vec<RistrettoPoint> = mf_gens.G();
+        let H: Vec<RistrettoPoint> = mf_gens.H();
+        let U: Vec<RistrettoPoint> = mf_gens.U();
+
+        // a and b are the matrices for which we want to prove c=ab
+        // just generate random matrices every time
+        let a: Vec<_> = (0..(n*m)).map(|_| Scalar::random(&mut rng)).collect();
+        let b: Vec<_> = (0..(m*k)).map(|_| Scalar::random(&mut rng)).collect();
+        let c = mat_mult(&a, &b, n, k);
+        (G, H, U, a, b, c)
+    }
+
+    fn mfp_timing_helper(n: usize, m: usize, k: usize) {
+        let setup_start = Instant::now();
+        let (G, H, U, a, b, c) = mfp_timing_setup(n, m, k);
+        let setup_duration = setup_start.elapsed();
+        // generate proof
+        let mut prover = Transcript::new(b"matrixfoldingtest");
+        let create_start = Instant::now();
+        let proof = MatrixFoldingProof::create(
+            &mut prover,
+            G.clone(),
+            H.clone(),
+            U.clone(),
+            a.clone(),
+            b.clone(),
+            c.clone(),
+            n,
+            m,
+            k
+        );
+        let create_duration = create_start.elapsed();
+
+        let P = RistrettoPoint::vartime_multiscalar_mul(
+            a.iter()
+                .chain(b.iter())
+                .chain(c.iter()),
+            G.iter()
+                .chain(H.iter())
+                .chain(U.iter())
+        );
+
+        let mut verifier = Transcript::new(b"matrixfoldingtest");
+        let verify_start = Instant::now();
+        assert!(proof.verify(
+            &mut verifier,
+            &P,
+            &G[..],
+            &H[..],
+            &U[..],
+            n,
+            m,
+            k
+        )
+            .is_ok());
+        let verify_duration = verify_start.elapsed();
+
+        println!("SIZE n={}, m={}, k={}. DURATION setup={}, create={}, verify={}", 
+                n, m, k, 
+                setup_duration.as_secs_f32(),
+                create_duration.as_secs_f32(),
+                verify_duration.as_secs_f32()
+                );
+    }
+
+    #[test]
+    fn mfp_timing_1() {
+        mfp_timing_helper(1, 1, 1);
+    }
+
+    #[test]
+    fn mfp_timing_2() {
+        mfp_timing_helper(2, 1, 1);
+    }
+
+    #[test]
+    fn mfp_timing_3() {
+        mfp_timing_helper(4, 1, 1);
+    }
+
+    #[test]
+    fn mfp_timing_4() {
+        mfp_timing_helper(8, 1, 1);
+    }
+
+    #[test]
+    fn mfp_timing_5() {
+        mfp_timing_helper(32, 32, 32);
+    }
+
+    #[test]
+    fn mfp_timing_6() {
+        mfp_timing_helper(64, 64, 64);
+    }
+
+    #[test]
+    fn mfp_timing_7() {
+        mfp_timing_helper(128, 256, 512);
+    }
+
 }
 
