@@ -15,19 +15,13 @@ use crate::errors::ProofError;
 use crate::transcript::TranscriptProtocol;
 
 #[derive(Clone, Debug)]
-pub struct ZKMatrixFoldingProof {
+pub struct UnsafeMatrixFoldingProof {
     pub(crate) L_vec1: Vec<CompressedRistretto>,
     pub(crate) R_vec1: Vec<CompressedRistretto>,
-    pub(crate) L_vec2: Vec<CompressedRistretto>,
-    pub(crate) R_vec2: Vec<CompressedRistretto>,
     pub(crate) L_vec3: Vec<CompressedRistretto>,
     pub(crate) R_vec3: Vec<CompressedRistretto>,
-    pub(crate) alpha: CompressedRistretto,
-    pub(crate) beta: CompressedRistretto,
-    pub(crate) sigma: CompressedRistretto,
-    pub(crate) tau: CompressedRistretto,
-    pub(crate) rho_vec: Vec<CompressedRistretto>,
-    pub(crate) z_vec: Vec<Scalar>,
+    pub(crate) L_vec2: Vec<CompressedRistretto>,
+    pub(crate) R_vec2: Vec<CompressedRistretto>,
     pub(crate) a: Scalar,
     pub(crate) b: Scalar,
 
@@ -38,7 +32,7 @@ pub struct ZKMatrixFoldingProof {
     pub(crate) TESTUf: RistrettoPoint, */
 }
 
-impl ZKMatrixFoldingProof {
+impl UnsafeMatrixFoldingProof {
     /// Create a matrix folding proof.
     ///
     /// The `verifier` is passed in as a parameter so that the
@@ -51,15 +45,13 @@ impl ZKMatrixFoldingProof {
         mut G_vec: Vec<RistrettoPoint>, // say these are stored in row-major
         mut H_vec: Vec<RistrettoPoint>,
         mut U_vec: Vec<RistrettoPoint>, // this used to be Q and was not a vector nor mutable
-        g_0: RistrettoPoint, // blinding group element
-        mut a_vec: Vec<Scalar>, // A contains the TRANSPOSE of the matrix that is being used!!
-        mut b_vec: Vec<Scalar>,
+        mut a_vec: Vec<Scalar>,
+        mut b_vec: Vec<Scalar>, // I WILL ASSUME b CONTAINS THE TRANSPOSE OF THE MATRIX B!!!!
         mut c_vec: Vec<Scalar>,
-        mut r: Scalar, // blinding exponent
         mut n: usize, //not sure if these need to be mutable but I'm assuming yes
         mut m: usize,
         mut k: usize
-    ) -> ZKMatrixFoldingProof {
+    ) -> UnsafeMatrixFoldingProof {
         // Create slices G, H, a, b backed by their respective
         // vectors.  This lets us reslice as we compress the lengths
         // of the vectors in the main loop below.
@@ -72,10 +64,6 @@ impl ZKMatrixFoldingProof {
 
 
         let one = Scalar::one();
-
-        // for generating random blinding factors
-        let mut rng = rand::thread_rng();
-
 
         // All of the input vectors must have the same length.
         assert_eq!(G.len(), n*m);
@@ -98,53 +86,158 @@ impl ZKMatrixFoldingProof {
         let lg_k = k.next_power_of_two().trailing_zeros() as usize;
         
         // create vectors for L and R values
-        let mut L_vec1 = Vec::with_capacity(lg_m);
-        let mut R_vec1 = Vec::with_capacity(lg_m);
-        let mut L_vec2 = Vec::with_capacity(lg_n);
-        let mut R_vec2 = Vec::with_capacity(lg_n);
+        // 1 vecs are for folding A and C, 3 vecs for folding B and C, 2 vecs for folding A and B
+        // will be used in order 1 -> 3 -> 2 to avoid taking transposes
+        let mut L_vec1 = Vec::with_capacity(lg_n);
+        let mut R_vec1 = Vec::with_capacity(lg_n);
         let mut L_vec3 = Vec::with_capacity(lg_k);
         let mut R_vec3 = Vec::with_capacity(lg_k);
-
-        // create vectors for final ZK reduction
-        let mut rho_vec = Vec::with_capacity(4);
-        let mut z_vec = Vec::with_capacity(5);
+        let mut L_vec2 = Vec::with_capacity(lg_m);
+        let mut R_vec2 = Vec::with_capacity(lg_m);
 
         // Debugging: store challenges explicitly so we can check to be sure challenges
         // are recovered properly in verification.
         // Obviously this will NOT be part of the actual protocol
         // let mut TESTchall = Vec::with_capacity(lg_n + lg_m + lg_k);
 
-        // first fold A and B in inner product approach
-        // This means we want A to hold the TRANSPOSE of whatever matrix we're actually using
-        while m != 1 {
-            m = m/2;
-            let (a_l, a_r) = a.split_at_mut(m*n);
-            let (b_t, b_b) = b.split_at_mut(m*k);
-            let (G_l, G_r) = G.split_at_mut(m*n);
-            let (H_t, H_b) = H.split_at_mut(m*k);
+        // first fold A vertically
+        while n != 1 {
+            // fold A and G vertically
+            n = n/2;
+            let (a_t, a_b) = a.split_at_mut(n*m);
+            let (c_t, c_b) = c.split_at_mut(n*k);
+            let (G_t, G_b) = G.split_at_mut(n*m);
+            let (U_t, U_b) = U.split_at_mut(n*k);
 
-            // this time we need values of cross terms for L and R
-            // these are matrix multiplications :(
-            let c_l = tp_mat_mult(a_l, b_b, n, k);
-            let c_r = tp_mat_mult(a_r, b_t, n, k);
-
-            // gemerate blinding factors for L and R
-            let r_l = Scalar::random(&mut rng);
-            let r_r = Scalar::random(&mut rng);
-
+            // compute L and R
             let L = RistrettoPoint::vartime_multiscalar_mul(
-                a_l.iter().chain(b_b.iter()).chain(c_l.iter()).chain(iter::once(&r_l)), 
-                G_r.iter().chain(H_t.iter()).chain(U.iter()).chain(iter::once(&g_0))
-            ).compress(); 
+                a_t.iter().chain(c_t.iter()), 
+                G_b.iter().chain(U_b.iter())
+            ).compress();
 
             let R = RistrettoPoint::vartime_multiscalar_mul(
-                a_r.iter().chain(b_t.iter()).chain(c_r.iter()).chain(iter::once(&r_r)), 
-                G_l.iter().chain(H_b.iter()).chain(U.iter()).chain(iter::once(&g_0))
+                a_b.iter().chain(c_b.iter()),
+                G_t.iter().chain(U_t.iter())
+            ).compress();
+
+            // add L R to records for return struct
+            L_vec1.push(L);
+            R_vec1.push(R);
+
+            // add L R to transcript
+            transcript.append_point(b"L", &L);
+            transcript.append_point(b"R", &R);      
+
+            // get challenge and its inverse
+            let x = transcript.challenge_scalar(b"x");
+            let x_inv = x.invert();
+            // for debugging: add challenge to record
+            // TESTchall.push(x);
+            // compute a', G'
+            for i in 0..(n*m) {
+                a_t[i] = x * a_t[i] + a_b[i];
+                G_t[i] = RistrettoPoint::vartime_multiscalar_mul(&[x_inv, one], &[G_t[i], G_b[i]]);
+            }
+
+            // compute c', U'
+            for i in 0..(n*k) {
+                c_t[i] = x * c_t[i] + c_b[i];
+                U_t[i] = RistrettoPoint::vartime_multiscalar_mul(&[x_inv, one], &[U_t[i], U_b[i]]);
+            }
+
+            // update a, c, G, U
+            a = a_t;
+            c = c_t;
+            G = G_t;
+            U = U_t;
+        }
+
+
+        // now fold B horizontally (i.e. fold b, which stores B^T, vertically)
+        // Technically we need to find transpose of C (since it must also be folded horizontally), 
+        // but since A is now a row vector, C is a row vector, so we can just
+        // "re-interpret" it as a column vector and no actual work is needed to transpose it! which is very nice
+        // confirm that n=1 by this point:
+        // assert_eq!(n,1);
+        while k != 1 {
+            k = k/2;
+            let (b_l, b_r) = b.split_at_mut(m*k);
+            let (c_l, c_r) = c.split_at_mut(k); // n == 1 by the time we get here
+            let (H_l, H_r) = H.split_at_mut(m*k);
+            let (U_l, U_r) = U.split_at_mut(k);
+
+            // compute L and R
+            let L = RistrettoPoint::vartime_multiscalar_mul(
+                b_l.iter().chain(c_l.iter()), 
+                H_r.iter().chain(U_r.iter())
+            ).compress();
+
+            let R = RistrettoPoint::vartime_multiscalar_mul(
+                b_r.iter().chain(c_r.iter()),
+                H_l.iter().chain(U_l.iter())
+            ).compress();
+
+            // add L R to records for return struct
+            L_vec3.push(L);
+            R_vec3.push(R);
+
+            // add L R to transcript
+            transcript.append_point(b"L", &L);
+            transcript.append_point(b"R", &R);      
+
+            // get challenge and its inverse
+            let x = transcript.challenge_scalar(b"x");
+            let x_inv = x.invert();
+            // TESTchall.push(x);
+
+            // compute new b', H', c', U'
+            for i in 0..(m*k) {
+                b_l[i] = x * b_l[i] + b_r[i];
+                H_l[i] = RistrettoPoint::vartime_multiscalar_mul(&[x_inv, one], &[H_l[i], H_r[i]]);
+            }
+
+            for i in 0..k {
+                c_l[i] = x * c_l[i] + c_r[i];
+                U_l[i] = RistrettoPoint::vartime_multiscalar_mul(&[x_inv, one], &[U_l[i], U_r[i]]);
+            }
+
+            b = b_l;
+            H = H_l;
+            c = c_l;
+            U = U_l;
+        }
+     
+        // now a is 1 x m and b is m x 1 and c is 1 x 1. 
+        // because b stores B^T, which is a row vector, which we can reinterpret as the column vector B! yay
+        // at this point it is just an inner product proof
+        // to confirm that folding in other dimensions is done:
+        /* assert_eq!(k,1);
+        assert_eq!(n,1);
+        assert_eq!(U.len(),1); */
+        while m != 1 {
+            m = m/2;
+            let (a_l, a_r) = a.split_at_mut(m);
+            let (b_t, b_b) = b.split_at_mut(m);
+            let (G_l, G_r) = G.split_at_mut(m);
+            let (H_t, H_b) = H.split_at_mut(m);
+
+            // this time we need values of cross terms for L and R
+            let c_l = inner_product(a_l, b_b);
+            let c_r = inner_product(a_r, b_t);
+
+            let L = RistrettoPoint::vartime_multiscalar_mul(
+                a_l.iter().chain(b_b.iter().chain(iter::once(&c_l))), 
+                G_r.iter().chain(H_t.iter().chain(U.iter()))
+            ).compress(); // at this point U should have length 1
+
+            let R = RistrettoPoint::vartime_multiscalar_mul(
+                a_r.iter().chain(b_t.iter().chain(iter::once(&c_r))), 
+                G_l.iter().chain(H_b.iter().chain(U.iter()))
             ).compress();
 
              // add L R to records for return struct
-             L_vec1.push(L);
-             R_vec1.push(R);
+             L_vec2.push(L);
+             R_vec2.push(R);
  
              // add L R to transcript
              transcript.append_point(b"L", &L);
@@ -155,7 +248,6 @@ impl ZKMatrixFoldingProof {
             let x_inv = x.invert();
             // TESTchall.push(x);
 
-            // update witness values and parameters
             for i in 0..m {
                 a_l[i] = x * a_l[i] + a_r[i];
                 b_t[i] = x_inv * b_t[i] + b_b[i];
@@ -163,18 +255,15 @@ impl ZKMatrixFoldingProof {
                 H_t[i] = RistrettoPoint::vartime_multiscalar_mul(&[x, one], &[H_t[i], H_b[i]]);
             }
 
-            r = (x * r_l) + r + (x_inv * r_r);
             a = a_l;
             b = b_t;
             G = G_l;
             H = H_t;
 
         }
-
-        
         // return value
         // note proof keeps its own record of L and R terms from each iteration, separate from transcript
-        ZKMatrixFoldingProof {
+        UnsafeMatrixFoldingProof {
             L_vec1: L_vec1,
             R_vec1: R_vec1,
             L_vec3: L_vec3,
@@ -415,21 +504,16 @@ impl ZKMatrixFoldingProof {
     }
 }
 
-// This assumes a is column-major and b is row-major, as used in first reduction step.
-// a should have n rows and b should have k columns
-pub fn tp_mat_mult(a: &[Scalar], b: &[Scalar], n: usize, k: usize) -> Vec<Scalar> {
+// This assumes a is row-major, b is a row-major representation of b TRANSPOSE
+// so we want to calculate a*b, but we are given the transpose of b as input
+// a should have n rows and b should have k columns (so b transpose should have k rows)
+pub fn mat_mult(a: &[Scalar], b: &[Scalar], n: usize, k: usize) -> Vec<Scalar> {
     let mut c = Vec::with_capacity(n*k);
     let m = a.len()/n;
     // assert_eq!(m, b.len()/k);
-    for i in 0..n {
-        let a_row = a.iter().skip(i).step_by(n);
-        for j in 0..k {
-            let b_col = b.iter().skip(j).step_by(k);
-            let mut val = Scalar::zero();
-            for (a_val, b_val) in a_row.zip(b_col) {
-                val += a_val * b_val;
-            }
-            c.push(val);
+    for a_row in a.chunks(m) {
+        for b_col in b.chunks(m) {
+            c.push(inner_product(a_row,b_col));
         }
     }
     c
