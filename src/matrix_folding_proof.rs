@@ -171,7 +171,24 @@ impl ZKMatrixFoldingProof {
 
         }
 
+        // now for "mini-reduction" 1, to transform the commitments
+        let t = Scalar::random(&mut rng);
+        let mut q = r - t;
+        r = t;
+
+        c = &mut tp_mat_mult(a, b, n, k);
+
+        let mut alpha = RistrettoPoint::vartime_multiscalar_mul(
+            a.iter().chain(c.iter()).chain(iter::once(&q)),
+            G.iter().chain(U.iter()).chain(iter::once(&g_0)));
+
+        let mut beta = RistrettoPoint::vartime_multiscalar_mul(
+            b.iter().chain(iter::once(&r)), 
+            H.iter().chain(iter::once(&g_0)));
         
+        transcript.append_point(b"a", &alpha);
+        transcript.append_point(b"b", &beta);
+
         // return value
         // note proof keeps its own record of L and R terms from each iteration, separate from transcript
         ZKMatrixFoldingProof {
