@@ -123,7 +123,7 @@ impl ZKMatrixFoldingProof {
             let (G_l, G_r) = G.split_at_mut(m*n);
             let (H_t, H_b) = H.split_at_mut(m*k);
 
-            // this time we need values of cross terms for L and R
+            // get cross terms for L and R
             // these are matrix multiplications :(
             let c_l = tp_mat_mult(a_l, b_b, n, k);
             let c_r = tp_mat_mult(a_r, b_t, n, k);
@@ -186,8 +186,91 @@ impl ZKMatrixFoldingProof {
             b.iter().chain(iter::once(&r)), 
             H.iter().chain(iter::once(&g_0)));
         
-        transcript.append_point(b"a", &alpha);
-        transcript.append_point(b"b", &beta);
+        // TODO: check whether clone is needed
+        transcript.append_point(b"a", &alpha.clone().compress());
+        transcript.append_point(b"b", &beta.clone().compress());
+
+
+        // Now, fold n (A)
+        // A now holds a col vector, so can fold vertically easily
+        while n != 1 {
+            n = n/2;
+            let (a_t, a_b) = a.split_at_mut(n);
+            let (G_t, G_b) = G.split_at_mut(n);
+            let (U_t, U_b) = U.split_at_mut(n*k);
+
+            // get cross terms for L and R
+            // these are matrix multiplications :(
+            let c_l = tp_mat_mult(a_t, b, n, k);
+            let c_r = tp_mat_mult(a_b, b, n, k);
+
+            // gemerate blinding factors for L and R
+            let q_l = Scalar::random(&mut rng);
+            let q_r = Scalar::random(&mut rng);
+
+            let L = RistrettoPoint::vartime_multiscalar_mul(
+                a_t.iter().chain(c_l.iter()).chain(iter::once(&q_l)), 
+                G_b.iter().chain(U_t.iter()).chain(U.iter()).chain(iter::once(&g_0))
+            ).compress(); 
+
+            let R = RistrettoPoint::vartime_multiscalar_mul(
+                a_b.iter().chain(c_r.iter()).chain(iter::once(&q_r)), 
+                G_t.iter().chain(U_t.iter()).chain(iter::once(&g_0))
+            ).compress();
+
+             // add L R to records for return struct
+             L_vec2.push(L);
+             R_vec2.push(R);
+ 
+             // add L R to transcript
+             transcript.append_point(b"L", &L);
+             transcript.append_point(b"R", &R); 
+
+             // get challenge and its inverse
+            let y = transcript.challenge_scalar(b"y");
+            let y_inv = x.invert();
+            
+            // compute new a, G
+            for i in 0..n {
+                a_t[i] = y * a_t[i] + a_b[i];
+                G_t[i] = RistrettoPoint::vartime_multiscalar_mul(&[y_inv, one], &[G_t[i], G_b[i]]);
+            }
+
+            // compute new c, U
+            for i in 0..(n*k) {
+                c_t[i] = y * c_t[i] + c_b[i];
+                U_t[i] = RistrettoPoint::vartime_multiscalar_mul(&[y_inv, one], &[U_t[i], U_b[i]]);
+            }
+
+            // compute and update q
+            q = (y * q_l) + q + (y_inv * q_r);
+
+            // update a, c, G, U
+            a = a_t;
+            c = c_t;
+            G = G_t;
+            U = U_t;
+        }
+
+        // mini-reduction 2: transform commitments again
+        let t = Scalar::random(&mut rng);
+        q = q - t;
+        let mut s = t;
+
+        c = &mut tp_mat_mult(a, b, n, k);
+
+        let mut sigma = RistrettoPoint::vartime_multiscalar_mul(
+            a.iter().chain(iter::once(&q)),
+            G.iter().chain(iter::once(&g_0)));
+
+        let mut tau = RistrettoPoint::vartime_multiscalar_mul(
+            c.iter().chain(iter::once(&s)), 
+            U.iter().chain(iter::once(&g_0)));
+        
+        // TODO: check whether clone is needed
+        transcript.append_point(b"s", &sigma.clone().compress());
+        transcript.append_point(b"t", &tau.clone().compress());
+
 
         // return value
         // note proof keeps its own record of L and R terms from each iteration, separate from transcript
