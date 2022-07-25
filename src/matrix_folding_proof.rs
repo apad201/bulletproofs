@@ -423,19 +423,22 @@ impl ZKMatrixFoldingProof {
         m: usize,
         k: usize,
         transcript: &mut Transcript,
-    ) -> Result<(Vec<Scalar>, Vec<Scalar>, Vec<Scalar>, Vec<Scalar>, Vec<Scalar>, Vec<Scalar>, Vec<Scalar>, Vec<Scalar>, Vec<Scalar>), ProofError> {
+    ) -> Result<(Vec<Scalar>, Vec<Scalar>, Vec<Scalar>, Vec<Scalar>, Vec<Scalar>, Vec<Scalar>, Scalar, Vec<Scalar>, Vec<Scalar>, Vec<Scalar>), ProofError> {
         let lg_n = self.L_vec1.len();
         let lg_m = self.L_vec2.len();
-        let lg_k = self.L_vec3.len();
+        let lg_k = self.L_vec3_beta.len();
 
-        let num_rounds = lg_n + lg_m + lg_k;
-        if num_rounds >= 32 {
-            // 4 billion multiplications should be enough for anyone
-            // and this check prevents overflow in 1<<lg_n below.
+        if lg_n >= 32 || lg_m >= 32 || lg_k >= 32 {
+            // prevent overflow in bitshifts later on
             return Err(ProofError::VerificationError);
         }
-        if n != (1 << lg_n) {
+        if n != (1 << lg_n) || m != (1 << lg_m) || k != (1 << lg_k) {
+            // not powers of 2
             return Err(ProofError::VerificationError);
+        }
+        if self.L_vec3_tau.len() != lg_k || self.R_vec3_beta.len() != lg_k || self.R_vec3_tau.len() != lg_k {
+            // malformed vectors
+            return Err(ProofError::VerificationError)
         }
 
         transcript.matrixfolding_domain_sep(n as u64, m as u64, k as u64);
@@ -443,24 +446,45 @@ impl ZKMatrixFoldingProof {
         // 1. Recompute challenges based on the proof transcript
 
         let mut challenges1 = Vec::with_capacity(lg_n);
-        let mut challenges3 = Vec::with_capacity(lg_k);
-        let mut challenges2 = Vec::with_capacity(lg_m);
+        let mut challenges2 = Vec::with_capacity(lg_k);
+        let mut challenges3 = Vec::with_capacity(lg_m);
 
         for (L, R) in self.L_vec1.iter().zip(self.R_vec1.iter()) {
             transcript.validate_and_append_point(b"L", L)?;
             transcript.validate_and_append_point(b"R", R)?;
             challenges1.push(transcript.challenge_scalar(b"x"));
         }
-        for (L, R) in self.L_vec3.iter().zip(self.R_vec3.iter()) {
-            transcript.validate_and_append_point(b"L", L)?;
-            transcript.validate_and_append_point(b"R", R)?;
-            challenges3.push(transcript.challenge_scalar(b"x"));
-        }
+
+        transcript.validate_and_append_point(b"a", &self.alpha)?;
+        transcript.validate_and_append_point(b"b", &self.beta)?;
+        
         for (L, R) in self.L_vec2.iter().zip(self.R_vec2.iter()) {
             transcript.validate_and_append_point(b"L", L)?;
             transcript.validate_and_append_point(b"R", R)?;
-            challenges2.push(transcript.challenge_scalar(b"x"));
+            challenges2.push(transcript.challenge_scalar(b"y"));
         }
+
+        transcript.validate_and_append_point(b"s", &self.sigma)?;
+        transcript.validate_and_append_point(b"t", &self.tau)?;
+
+        let iter3 = 
+            self.L_vec3_beta.iter()
+            .zip(self.R_vec3_beta.iter())
+            .zip(self.L_vec3_tau.iter())
+            .zip(self.R_vec3_tau.iter())
+            .map(|(((x,y),z),w)| (x,y,z,w));
+        for (L_beta, R_beta, L_tau, R_tau) in iter3 {
+            transcript.validate_and_append_point(b"bL", &L_beta)?;
+            transcript.validate_and_append_point(b"bR", &R_beta)?;
+            transcript.validate_and_append_point(b"tL", &L_tau)?;
+            transcript.validate_and_append_point(b"tR", &R_tau)?;
+            challenges3.push(transcript.challenge_scalar(b"z"));
+        }
+
+        for comm in self.rho_vec.iter() {
+            transcript.validate_and_append_point(b"rh", comm)?;
+        }
+        let zk_mult_chall = transcript.challenge_scalar(b"x");
 
         // Some debugging tests: ensure that challenges were correctly recovered
         /* let mut TESTchall = challenges1.clone();
@@ -475,21 +499,21 @@ impl ZKMatrixFoldingProof {
         let allinv2 = Scalar::batch_invert(&mut challenges2_inv);
         let mut challenges3_inv = challenges3.clone();
         let allinv3 = Scalar::batch_invert(&mut challenges3_inv);
-        let mut all2 = Scalar::one();
-        for x in challenges2.iter() {
-            all2 *= x;
+        let mut all1 = Scalar::one();
+        for y in challenges1.iter() {
+            all1 *= y;
         }
 
         let mut challengesG = challenges1.clone();
         challengesG.extend(&challenges2);
-        let mut challengesH = challenges3.clone();
-        challengesH.extend(&challenges2_inv);
-        let mut challengesU = challenges1.clone();
+        let mut challengesH = challenges1_inv.clone();
+        challengesH.extend(&challenges2);
+        let mut challengesU = challenges2.clone();
         challengesU.extend(&challenges3);
 
         let s_G0 = allinv1 * allinv2;
-        let s_H0 = allinv3 * all2;
-        let s_U0 = allinv1 * allinv3;
+        let s_H0 = all1 * allinv2;
+        let s_U0 = allinv2 * allinv3;
 
         // all the copying above might be unnecessary. this definitely will hurt performance
         // is there a way to replace with chained iterators? don't think so but that would 
@@ -526,7 +550,7 @@ impl ZKMatrixFoldingProof {
         }
         //assert_eq!(s_G[n*m - 1], Scalar::one());
         //assert_eq!(s_G[0], challenges1_inv[0]);
-        Ok((challenges1, challenges3, challenges2, challenges1_inv, challenges3_inv, challenges2_inv, s_G, s_H, s_U))
+        Ok((challenges1, challenges2, challenges3, challenges1_inv, challenges2_inv, challenges3_inv, zk_mult_chall, s_G, s_H, s_U))
     }
 
     /// This method is for testing that proof generation works,
