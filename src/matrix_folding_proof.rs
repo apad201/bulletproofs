@@ -54,7 +54,6 @@ impl ZKMatrixFoldingProof {
         g_0: RistrettoPoint, // blinding group elements
         mut a_vec: Vec<Scalar>, // A contains the TRANSPOSE of the matrix that is being used!!
         mut b_vec: Vec<Scalar>,
-        mut c_vec: Vec<Scalar>,
         mut r: Scalar, // blinding exponent
         mut n: usize, //not sure if these need to be mutable but I'm assuming yes
         mut m: usize,
@@ -68,7 +67,6 @@ impl ZKMatrixFoldingProof {
         let mut U = &mut U_vec[..];
         let mut a = &mut a_vec[..];
         let mut b = &mut b_vec[..];
-        let mut c = &mut c_vec[..];
 
 
         let one = Scalar::one();
@@ -83,7 +81,6 @@ impl ZKMatrixFoldingProof {
         assert_eq!(U.len(), n*k);
         assert_eq!(a.len(), n*m);
         assert_eq!(b.len(), m*k);
-        assert_eq!(c.len(), n*k);
 
         // All of the input vectors must have a length that is a power of two.
         assert!(n.is_power_of_two());
@@ -174,13 +171,14 @@ impl ZKMatrixFoldingProof {
         let mut q = r - t;
         r = t;
 
-        c = &mut tp_mat_mult(a, b, n, k);
+        let mut c_vec = tp_mat_mult(a, b, n, k);
+        let mut c = &mut c_vec[..];
 
-        let mut alpha = RistrettoPoint::vartime_multiscalar_mul(
+        let alpha = RistrettoPoint::vartime_multiscalar_mul(
             a.iter().chain(c.iter()).chain(iter::once(&q)),
             G.iter().chain(U.iter()).chain(iter::once(&g_0)));
 
-        let mut beta = RistrettoPoint::vartime_multiscalar_mul(
+        let beta = RistrettoPoint::vartime_multiscalar_mul(
             b.iter().chain(iter::once(&r)), 
             H.iter().chain(iter::once(&g_0)));
         
@@ -209,7 +207,7 @@ impl ZKMatrixFoldingProof {
 
             let L = RistrettoPoint::vartime_multiscalar_mul(
                 a_t.iter().chain(c_l.iter()).chain(iter::once(&q_l)), 
-                G_b.iter().chain(U_t.iter()).chain(U.iter()).chain(iter::once(&g_0))
+                G_b.iter().chain(U_t.iter()).chain(iter::once(&g_0))
             ).compress(); 
 
             let R = RistrettoPoint::vartime_multiscalar_mul(
@@ -256,13 +254,11 @@ impl ZKMatrixFoldingProof {
         q = q - t;
         let mut s = t;
 
-        c = &mut tp_mat_mult(a, b, n, k);
-
-        let mut sigma = RistrettoPoint::vartime_multiscalar_mul(
+        let sigma = RistrettoPoint::vartime_multiscalar_mul(
             a.iter().chain(iter::once(&q)),
             G.iter().chain(iter::once(&g_0)));
 
-        let mut tau = RistrettoPoint::vartime_multiscalar_mul(
+        let tau = RistrettoPoint::vartime_multiscalar_mul(
             c.iter().chain(iter::once(&s)), 
             U.iter().chain(iter::once(&g_0)));
         
@@ -565,93 +561,153 @@ impl ZKMatrixFoldingProof {
         G: &[RistrettoPoint],
         H: &[RistrettoPoint],
         U: &[RistrettoPoint],
+        g_0: &RistrettoPoint,
         n: usize,
         m: usize,
         k: usize
     ) -> Result<(), ProofError> {
-        // get verification scalars
+        let one = Scalar::one();
         let (x1, x2, x3, x1_inv, x2_inv, x3_inv, zk_mult_chall, s_G, s_H, s_U) = self.verification_scalars(n, m, k, transcript)?;
 
-        // Debugging tests: confirms that all of the s-vectors were computed correctly.
-        // Also guarantees that folded G, H, and U group elements were computed correctly
-        // during proof generation
-        /* let TESTG = RistrettoPoint::vartime_multiscalar_mul(s_G.iter(), G.iter());
-        assert_eq!(TESTG, self.TESTGf);
-        let TESTH = RistrettoPoint::vartime_multiscalar_mul(s_H.iter(), H.iter());
-        assert_eq!(TESTH, self.TESTHf);
-        let TESTU = RistrettoPoint::vartime_multiscalar_mul(s_U.iter(), U.iter());
-        assert_eq!(TESTU, self.TESTUf); */
-
-        // compute remaining exponents for verification equation (for G and H and U terms)
-        let g_exp = s_G.iter().map(|s_i| self.a * s_i);
-        let h_exp = s_H.iter().map(|s_i| self.b * s_i);
-        let c = self.a * self.b;
-        let u_exp = s_U.iter().map(|s_i| c * s_i);
-
-        // Debugging tests: ensures above computations worked as expected
-        /* let H_EXPED = RistrettoPoint::vartime_multiscalar_mul(h_exp.clone(), H.iter());
-        let Hf_EXPED = RistrettoPoint::vartime_multiscalar_mul(iter::once(&self.b), iter::once(self.TESTHf));
-        assert_eq!(H_EXPED, Hf_EXPED); */
-
-        // Compute more verification exponents (here for L and R terms)
-        let neg_x = x1.iter()
-            .chain(x3.iter())
-            .chain(x2.iter())
-            .map(|xi| -xi);
-        let neg_x_inv = x1_inv.iter()
-            .chain(x3_inv.iter())
-            .chain(x2_inv.iter())
-            .map(|xi| -xi);
-
-        // Debugging tests: confirm L and R exponents agree with outputs from verification_scalars fn
-        /* for (val1, val2) in neg_x.clone().zip(neg_x_inv.clone()) {
-            assert_eq!(val1 * val2, Scalar::one());
-        }
-        for (val1, val2) in neg_x.clone().zip(x1.iter().chain(x3.iter().chain(x2.iter()))) {
-            assert_eq!(val1 + val2, Scalar::zero());
-        } */
-
-        // Get L and R values from proof
-        let Ls = self
-            .L_vec1
-            .iter()
-            .chain(self.L_vec3
-            .iter()
-            .chain(self.L_vec2
-            .iter()))
+        // check for mini-reduction 1
+        let alpha = self.alpha.decompress().ok_or(ProofError::VerificationError)?;
+        let beta = self.beta.decompress().ok_or(ProofError::VerificationError)?;
+        let Ls = 
+            self.L_vec1.iter()
             .map(|p| p.decompress().ok_or(ProofError::VerificationError))
             .collect::<Result<Vec<_>, _>>()?;
-
-        let Rs = self
-            .R_vec1
-            .iter()
-            .chain(self.R_vec3
-            .iter()
-            .chain(self.R_vec2
-            .iter()))
+        let Rs = 
+            self.R_vec1.iter()
             .map(|p| p.decompress().ok_or(ProofError::VerificationError))
             .collect::<Result<Vec<_>, _>>()?;
-
-        // Compute the verification eqn
-        let expect_P = RistrettoPoint::vartime_multiscalar_mul(
-            g_exp
-                .chain(h_exp)
-                .chain(u_exp)
-                .chain(neg_x)
-                .chain(neg_x_inv),
-            G.iter()
-                .chain(H.iter())
-                .chain(U.iter())
-                .chain(Ls.iter())
-                .chain(Rs.iter())
+        let P_final = RistrettoPoint::vartime_multiscalar_mul(
+            x1.iter().chain(x1_inv.iter()).chain(iter::once(&one)), 
+            Ls.iter().chain(Rs.iter()).chain(iter::once(P))
         );
 
-        // See if verification passes
-        if expect_P == *P {
-            Ok(())
-        } else {
-            Err(ProofError::VerificationError)
+        if alpha + beta != P_final {
+            return Err(ProofError::VerificationError);
         }
+
+        // check for mini-reduction 2
+        let sigma = self.sigma.decompress().ok_or(ProofError::VerificationError)?;
+        let tau = self.tau.decompress().ok_or(ProofError::VerificationError)?;
+        // need to compute value of alpha after all runs of reduction Phi2 
+        let alpha_Ls = 
+            self.L_vec2.iter()
+            .map(|p| p.decompress().ok_or(ProofError::VerificationError))
+            .collect::<Result<Vec<_>, _>>()?;
+        let alpha_Rs = 
+            self.R_vec2.iter()
+            .map(|p| p.decompress().ok_or(ProofError::VerificationError))
+            .collect::<Result<Vec<_>, _>>()?;
+        let alpha_final = RistrettoPoint::vartime_multiscalar_mul(
+            x2.iter().chain(x2_inv.iter()).chain(iter::once(&one)),
+            alpha_Ls.iter().chain(alpha_Rs.iter()).chain(iter::once(&alpha)));
+
+        if sigma + beta + tau != alpha_final + beta {
+            return Err(ProofError::VerificationError);
+        }
+
+        // check for mini-reduction 3
+        // don't combine computation of beta_final and tau_final into single op b/c separate vals will be needed later
+        let beta_Ls = 
+            self.L_vec3_beta.iter()
+            .map(|p| p.decompress().ok_or(ProofError::VerificationError))
+            .collect::<Result<Vec<_>, _>>()?;
+        let beta_Rs = 
+            self.R_vec3_beta.iter()
+            .map(|p| p.decompress().ok_or(ProofError::VerificationError))
+            .collect::<Result<Vec<_>, _>>()?;
+        let beta_points = 
+            beta_Ls.iter().chain(beta_Rs.iter()).chain(iter::once(&beta));
+        /* let beta_final = RistrettoPoint::vartime_multiscalar_mul(
+            x3.iter().chain(x3_inv.iter()).chain(iter::once(&one)), 
+            beta_Ls.iter().chain(beta_Rs.iter()).chain(iter::once(&beta))); */
+        
+        let tau_Ls = 
+            self.L_vec3_tau.iter()
+            .map(|p| p.decompress().ok_or(ProofError::VerificationError))
+            .collect::<Result<Vec<_>, _>>()?;
+        let tau_Rs = 
+            self.R_vec3_tau.iter()
+            .map(|p| p.decompress().ok_or(ProofError::VerificationError))
+            .collect::<Result<Vec<_>, _>>()?;
+        let tau_points = 
+            tau_Ls.iter().chain(tau_Rs.iter()).chain(iter::once(&tau));
+        /* let tau_final = RistrettoPoint::vartime_multiscalar_mul(
+            x3.iter().chain(x3_inv.iter()).chain(iter::once(&one)), 
+            tau_Ls.iter().chain(tau_Rs.iter()).chain(iter::once(&tau))); */
+        
+        // compute remaining exponents for verification equation (for G and H and U terms)
+        let g_exp = s_G.iter().map(|s_i| self.z_vec[0] * s_i);
+        let h_exp = s_H.iter().map(|s_i| self.z_vec[2] * s_i);
+        let c = self.z_vec[0] * self.z_vec[2];
+        let u_exp = s_U.iter().map(|s_i| c * s_i);
+        
+        let neg_zk_mult_chall = -zk_mult_chall;
+        let neg_zk_mult_chall_sq = zk_mult_chall * neg_zk_mult_chall;
+
+        let beta_exp = x3.iter()
+            .chain(x3_inv.iter())
+            .chain(iter::once(&one))
+            .map(|x| x * neg_zk_mult_chall);
+
+        let tau_exp = x3.iter()
+            .chain(x3_inv.iter())
+            .chain(iter::once(&one))
+            .map(|x| x * neg_zk_mult_chall_sq);
+
+        // we will need the rho commitments
+        let rho = 
+            self.rho_vec.iter()
+            .map(|p| p.decompress().ok_or(ProofError::VerificationError))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        // first check of mini-red 3
+        let check1 = RistrettoPoint::vartime_multiscalar_mul(
+            g_exp
+                .chain(iter::once(self.z_vec[1]))
+                .chain(iter::once(neg_zk_mult_chall)),
+            G.iter()
+                .chain(iter::once(g_0))
+                .chain(iter::once(&sigma)));
+        
+        if check1 != rho[0] {
+            return Err(ProofError::VerificationError);
+        }
+
+        // second check of mini-red 3
+        let check2 = RistrettoPoint::vartime_multiscalar_mul(
+            h_exp
+                .chain(iter::once(self.z_vec[3]))
+                .chain(beta_exp), 
+            H.iter()
+                .chain(iter::once(g_0))
+                .chain(beta_points)
+        );
+        
+        if check2 != rho[3] {
+            return Err(ProofError::VerificationError);
+        }
+
+        // third check of mini-red 3
+        let check3 = RistrettoPoint::vartime_multiscalar_mul(
+            u_exp
+                .chain(iter::once(self.z_vec[4]))
+                .chain(iter::once(neg_zk_mult_chall))
+                .chain(tau_exp), 
+            U.iter()
+                .chain(iter::once(g_0))
+                .chain(iter::once(&rho[3]))
+                .chain(tau_points)
+            );
+        
+        if check3 != rho[2] {
+            return Err(ProofError::VerificationError);
+        }
+
+        Ok(())
     }
 }
 
@@ -659,11 +715,11 @@ impl ZKMatrixFoldingProof {
 // a should have n rows and b should have k columns
 pub fn tp_mat_mult(a: &[Scalar], b: &[Scalar], n: usize, k: usize) -> Vec<Scalar> {
     let mut c = Vec::with_capacity(n*k);
-    let m = a.len()/n;
+    // let m = a.len()/n;
     // assert_eq!(m, b.len()/k);
     for i in 0..n {
-        let a_row = a.iter().skip(i).step_by(n);
         for j in 0..k {
+            let a_row = a.iter().skip(i).step_by(n);
             let b_col = b.iter().skip(j).step_by(k);
             let mut val = Scalar::zero();
             for (a_val, b_val) in a_row.zip(b_col) {

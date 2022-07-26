@@ -315,6 +315,7 @@ impl MatrixFoldingGens {
     /// * `party_capacity` is the maximum number of parties that can
     ///    produce an aggregated proof.
     pub fn new(new_n: usize, new_m: usize, new_k: usize) -> Self {
+        let g_0 = GeneratorsChain::new(b"0").take(1).next();
         let mut gens = MatrixFoldingGens {
             n: 0,
             m: 0,
@@ -322,7 +323,7 @@ impl MatrixFoldingGens {
             G_vec: Vec::new(),
             H_vec: Vec::new(),
             U_vec: Vec::new(),
-            g_0: None
+            g_0
         };
         gens.increase_capacity(new_n, new_m, new_k);
         gens
@@ -356,9 +357,6 @@ impl MatrixFoldingGens {
                 .fast_forward(self.n * self.k)
                 .take((new_n * new_k) - (self.n * self.k)),
         );
-        if self.n + self.m + self.k == 0 {
-            self.g_0 = GeneratorsChain::new(b"0").take(1).next();
-        }
         self.n = new_n;
         self.m = new_m;
         self.k = new_k;
