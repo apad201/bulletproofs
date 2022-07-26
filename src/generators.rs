@@ -296,7 +296,8 @@ pub struct MatrixFoldingGens {
     G_vec: Vec<RistrettoPoint>,
     /// Precomputed \\(\mathbf H\\) generators for each party.
     H_vec: Vec<RistrettoPoint>,
-    U_vec: Vec<RistrettoPoint>
+    U_vec: Vec<RistrettoPoint>,
+    g_0: Option<RistrettoPoint>
 }
 
 
@@ -320,7 +321,8 @@ impl MatrixFoldingGens {
             k: 0,
             G_vec: Vec::new(),
             H_vec: Vec::new(),
-            U_vec: Vec::new()
+            U_vec: Vec::new(),
+            g_0: None
         };
         gens.increase_capacity(new_n, new_m, new_k);
         gens
@@ -354,6 +356,9 @@ impl MatrixFoldingGens {
                 .fast_forward(self.n * self.k)
                 .take((new_n * new_k) - (self.n * self.k)),
         );
+        if self.n + self.m + self.k == 0 {
+            self.g_0 = GeneratorsChain::new(b"0").take(1).next();
+        }
         self.n = new_n;
         self.m = new_m;
         self.k = new_k;
@@ -368,6 +373,9 @@ impl MatrixFoldingGens {
     }
     pub(crate) fn U(&self) -> Vec<RistrettoPoint> {
         self.U_vec.clone()
+    }
+    pub(crate) fn g_0(&self) -> Option<RistrettoPoint> {
+        self.g_0
     }
 }
 

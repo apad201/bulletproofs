@@ -570,7 +570,7 @@ impl ZKMatrixFoldingProof {
         k: usize
     ) -> Result<(), ProofError> {
         // get verification scalars
-        let (x1, x3, x2, x1_inv, x3_inv, x2_inv, s_G, s_H, s_U) = self.verification_scalars(n, m, k, transcript)?;
+        let (x1, x2, x3, x1_inv, x2_inv, x3_inv, zk_mult_chall, s_G, s_H, s_U) = self.verification_scalars(n, m, k, transcript)?;
 
         // Debugging tests: confirms that all of the s-vectors were computed correctly.
         // Also guarantees that folded G, H, and U group elements were computed correctly
