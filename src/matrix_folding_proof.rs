@@ -838,7 +838,6 @@ mod tests {
             .is_ok());
     }
 
-    // test cases: currently tests 1-5 pass and 6-9 fail (fails whenever m \neq 1)
     #[test]
     fn make_mfp_1() {
         mfp_test_helper_create(1, 1, 1);
