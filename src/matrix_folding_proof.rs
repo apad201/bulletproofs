@@ -420,22 +420,25 @@ impl ZKMatrixFoldingProof {
         k: usize,
         transcript: &mut Transcript,
     ) -> Result<(Vec<Scalar>, Vec<Scalar>, Vec<Scalar>, Vec<Scalar>, Vec<Scalar>, Vec<Scalar>, Scalar, Vec<Scalar>, Vec<Scalar>, Vec<Scalar>), ProofError> {
-        let lg_n = self.L_vec1.len();
-        let lg_m = self.L_vec2.len();
+        let lg_m = self.L_vec1.len();
+        let lg_n = self.L_vec2.len();
         let lg_k = self.L_vec3_beta.len();
 
         if lg_n >= 32 || lg_m >= 32 || lg_k >= 32 {
             // prevent overflow in bitshifts later on
             return Err(ProofError::VerificationError);
         }
-        if n != (1 << lg_n) || m != (1 << lg_m) || k != (1 << lg_k) {
+        if (lg_n != 0 && n != (1 << lg_n)) || (lg_m != 0 && m != (1 << lg_m)) || (lg_k != 0 && k != (1 << lg_k)) {
             // not powers of 2
             return Err(ProofError::VerificationError);
         }
         if self.L_vec3_tau.len() != lg_k || self.R_vec3_beta.len() != lg_k || self.R_vec3_tau.len() != lg_k {
             // malformed vectors
-            return Err(ProofError::VerificationError)
+            return Err(ProofError::VerificationError);
         }
+
+        //debug
+        println!("Verification_scalars passed first checks");
 
         transcript.matrixfolding_domain_sep(n as u64, m as u64, k as u64);
 
@@ -566,6 +569,8 @@ impl ZKMatrixFoldingProof {
         m: usize,
         k: usize
     ) -> Result<(), ProofError> {
+        //debug
+        println!("BEGIN computations");
         let one = Scalar::one();
         let (x1, x2, x3, x1_inv, x2_inv, x3_inv, zk_mult_chall, s_G, s_H, s_U) = self.verification_scalars(n, m, k, transcript)?;
 
@@ -584,7 +589,9 @@ impl ZKMatrixFoldingProof {
             x1.iter().chain(x1_inv.iter()).chain(iter::once(&one)), 
             Ls.iter().chain(Rs.iter()).chain(iter::once(P))
         );
-
+        // debug
+        println!("MINI-RED 1 CHECK");
+        assert_eq!(alpha + beta, P_final);
         if alpha + beta != P_final {
             return Err(ProofError::VerificationError);
         }
@@ -604,7 +611,9 @@ impl ZKMatrixFoldingProof {
         let alpha_final = RistrettoPoint::vartime_multiscalar_mul(
             x2.iter().chain(x2_inv.iter()).chain(iter::once(&one)),
             alpha_Ls.iter().chain(alpha_Rs.iter()).chain(iter::once(&alpha)));
-
+        
+        //debug
+        assert_eq!(sigma + beta + tau, alpha_final + beta);
         if sigma + beta + tau != alpha_final + beta {
             return Err(ProofError::VerificationError);
         }
@@ -673,6 +682,8 @@ impl ZKMatrixFoldingProof {
                 .chain(iter::once(g_0))
                 .chain(iter::once(&sigma)));
         
+        //debug
+        assert_eq!(check1, rho[0]);
         if check1 != rho[0] {
             return Err(ProofError::VerificationError);
         }
@@ -687,7 +698,9 @@ impl ZKMatrixFoldingProof {
                 .chain(beta_points)
         );
         
-        if check2 != rho[3] {
+        //debug
+        assert_eq!(check2, rho[1]);
+        if check2 != rho[1] {
             return Err(ProofError::VerificationError);
         }
 
@@ -703,6 +716,7 @@ impl ZKMatrixFoldingProof {
                 .chain(tau_points)
             );
         
+        assert_eq!(check3, rho[2]);
         if check3 != rho[2] {
             return Err(ProofError::VerificationError);
         }
