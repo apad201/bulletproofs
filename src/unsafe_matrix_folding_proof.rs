@@ -608,47 +608,47 @@ mod tests {
 
     // test cases: currently tests 1-5 pass and 6-9 fail (fails whenever m \neq 1)
     #[test]
-    fn make_mfp_1() {
+    fn u_make_mfp_1() {
         mfp_test_helper_create(1, 1, 1);
     }
 
     #[test]
-    fn make_mfp_2() {
+    fn u_make_mfp_2() {
         mfp_test_helper_create(16, 1, 1);
     }
 
     #[test]
-    fn make_mfp_3() {
+    fn u_make_mfp_3() {
         mfp_test_helper_create(1,1,16);
     }
 
     #[test]
-    fn make_mfp_4() {
+    fn u_make_mfp_4() {
         mfp_test_helper_create(16,1,16);
     }
 
     #[test]
-    fn make_mfp_5() {
+    fn u_make_mfp_5() {
         mfp_test_helper_create(16,1,32);
     }
 
     #[test]
-    fn make_mfp_6() {
+    fn u_make_mfp_6() {
         mfp_test_helper_create(1,16,1);
     }
 
     #[test]
-    fn make_mfp_7() {
+    fn u_make_mfp_7() {
         mfp_test_helper_create(8,16,1);
     }
 
     #[test]
-    fn make_mfp_8() {
+    fn u_make_mfp_8() {
         mfp_test_helper_create(1,16,8);
     }
 
     #[test]
-    fn make_mfp_9() {
+    fn u_make_mfp_9() {
         mfp_test_helper_create(32,4,8);
     }
 

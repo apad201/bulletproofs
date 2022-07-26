@@ -766,12 +766,14 @@ mod tests {
         let G: Vec<RistrettoPoint> = mf_gens.G();
         let H: Vec<RistrettoPoint> = mf_gens.H();
         let U: Vec<RistrettoPoint> = mf_gens.U();
+        let g_0 = mf_gens.g_0().unwrap();
 
         // a and b are the matrices for which we want to prove c=ab
         // just generate random matrices every time
         let a: Vec<_> = (0..(n*m)).map(|_| Scalar::random(&mut rng)).collect();
         let b: Vec<_> = (0..(m*k)).map(|_| Scalar::random(&mut rng)).collect();
-        let c = mat_mult(&a, &b, n, k);
+        let c = tp_mat_mult(&a, &b, n, k);
+        let r = Scalar::random(&mut rng);
 
         // debugging check: be sure matrix multiplication matches inner product if applicable
         /* if n == 1 && k == 1 {
@@ -782,22 +784,25 @@ mod tests {
         let P = RistrettoPoint::vartime_multiscalar_mul(
             a.iter()
                 .chain(b.iter())
-                .chain(c.iter()),
+                .chain(c.iter())
+                .chain(iter::once(&r)),
             G.iter()
                 .chain(H.iter())
                 .chain(U.iter())
+                .chain(iter::once(&g_0))
         );
 
         // generate proof
         let mut prover = Transcript::new(b"matrixfoldingtest");
-        let proof = UnsafeMatrixFoldingProof::create(
+        let proof = ZKMatrixFoldingProof::create(
             &mut prover,
             G.clone(),
             H.clone(),
             U.clone(),
+            g_0.clone(),
             a.clone(),
             b.clone(),
-            c.clone(),
+            r.clone(),
             n,
             m,
             k
@@ -811,6 +816,7 @@ mod tests {
             &G[..],
             &H[..],
             &U[..],
+            &g_0,
             n,
             m,
             k
@@ -869,11 +875,11 @@ mod tests {
         mfp_test_helper_create(1024,2048,512);
     }
 
-    fn mat_mult_test_helper(n: usize, m: usize, k: usize) {
+    fn tp_mat_mult_test_helper(n: usize, m: usize, k: usize) {
         let mut rng = rand::thread_rng();
         let a: Vec<_> = (0..(n*m)).map(|_| Scalar::random(&mut rng)).collect();
         let b: Vec<_> = (0..(m*k)).map(|_| Scalar::random(&mut rng)).collect();
-        let c = mat_mult(&a, &b, n, k);
+        let c = tp_mat_mult(&a, &b, n, k);
         
         for x in 0..n {
             for y in 0..k {
@@ -883,52 +889,52 @@ mod tests {
     }
 
     #[test]
-    fn mm_test_1() {
-        mat_mult_test_helper(1, 1, 1);
+    fn tp_mm_test_1() {
+        tp_mat_mult_test_helper(1, 1, 1);
     }
 
     #[test]
-    fn mm_test_2() {
-        mat_mult_test_helper(16,1,1);
+    fn tp_mm_test_2() {
+        tp_mat_mult_test_helper(16,1,1);
     }
 
     #[test]
-    fn mm_test_3() {
-        mat_mult_test_helper(1,1,16);
+    fn tp_mm_test_3() {
+        tp_mat_mult_test_helper(1,1,16);
     }
 
     #[test]
-    fn mm_test_4() {
-        mat_mult_test_helper(16,1,16);
+    fn tp_mm_test_4() {
+        tp_mat_mult_test_helper(16,1,16);
     }
 
     #[test]
-    fn mm_test_5() {
-        mat_mult_test_helper(1,16,1);
+    fn tp_m_test_5() {
+        tp_mat_mult_test_helper(1,16,1);
     }
 
     #[test]
-    fn mm_test_6() {
-        mat_mult_test_helper(16,32,1);
+    fn tp_mm_test_6() {
+        tp_mat_mult_test_helper(16,32,1);
     }
 
     #[test]
-    fn mm_test_7() {
-        mat_mult_test_helper(1,32,16);
+    fn tp_mm_test_7() {
+        tp_mat_mult_test_helper(1,32,16);
     }
 
     #[test]
-    fn mm_test_8() {
-        mat_mult_test_helper(64,32,16);
+    fn tp_mm_test_8() {
+        tp_mat_mult_test_helper(64,32,16);
     }
 
     #[test]
-    fn mm_test_9() {
-        mat_mult_test_helper(2,2,2);
+    fn tp_mm_test_9() {
+        tp_mat_mult_test_helper(2,2,2);
     }
 
 
-    fn mfp_timing_setup(n: usize, m: usize, k: usize) -> (Vec<RistrettoPoint>, Vec<RistrettoPoint>, Vec<RistrettoPoint>, Vec<Scalar>, Vec<Scalar>, Vec<Scalar>) {
+    fn mfp_timing_setup(n: usize, m: usize, k: usize) -> (Vec<RistrettoPoint>, Vec<RistrettoPoint>, Vec<RistrettoPoint>, RistrettoPoint, Vec<Scalar>, Vec<Scalar>, Vec<Scalar>, Scalar) {
         let mut rng = rand::thread_rng();
 
         // get group elements. See generators.rs file for how this works; I basically copied
@@ -939,44 +945,51 @@ mod tests {
         let G: Vec<RistrettoPoint> = mf_gens.G();
         let H: Vec<RistrettoPoint> = mf_gens.H();
         let U: Vec<RistrettoPoint> = mf_gens.U();
+        let g_0 = mf_gens.g_0().unwrap();
+
 
         // a and b are the matrices for which we want to prove c=ab
         // just generate random matrices every time
         let a: Vec<_> = (0..(n*m)).map(|_| Scalar::random(&mut rng)).collect();
         let b: Vec<_> = (0..(m*k)).map(|_| Scalar::random(&mut rng)).collect();
-        let c = mat_mult(&a, &b, n, k);
-        (G, H, U, a, b, c)
+        let r = Scalar::random(&mut rng);
+        let c = tp_mat_mult(&a, &b, n, k);
+        (G, H, U, g_0, a, b, c, r)
     }
 
     fn mfp_timing_helper(n: usize, m: usize, k: usize) {
         let setup_start = Instant::now();
-        let (G, H, U, a, b, c) = mfp_timing_setup(n, m, k);
+        let (G, H, U, g_0, a, b, c, r) = mfp_timing_setup(n, m, k);
         let setup_duration = setup_start.elapsed();
         // generate proof
         let mut prover = Transcript::new(b"matrixfoldingtest");
         let create_start = Instant::now();
-        let proof = UnsafeMatrixFoldingProof::create(
+        let P = RistrettoPoint::vartime_multiscalar_mul(
+            a.iter()
+                .chain(b.iter())
+                .chain(c.iter())
+                .chain(iter::once(&r)),
+            G.iter()
+                .chain(H.iter())
+                .chain(U.iter())
+                .chain(iter::once(&g_0))
+        );
+        let proof = ZKMatrixFoldingProof::create(
             &mut prover,
             G.clone(),
             H.clone(),
             U.clone(),
+            g_0.clone(),
             a.clone(),
             b.clone(),
-            c.clone(),
+            r.clone(),
             n,
             m,
             k
         );
         let create_duration = create_start.elapsed();
 
-        let P = RistrettoPoint::vartime_multiscalar_mul(
-            a.iter()
-                .chain(b.iter())
-                .chain(c.iter()),
-            G.iter()
-                .chain(H.iter())
-                .chain(U.iter())
-        );
+        
 
         let mut verifier = Transcript::new(b"matrixfoldingtest");
         let verify_start = Instant::now();
@@ -986,6 +999,7 @@ mod tests {
             &G[..],
             &H[..],
             &U[..],
+            &g_0,
             n,
             m,
             k
