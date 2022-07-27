@@ -29,13 +29,13 @@ pub struct ZKMatrixFoldingProof {
     pub(crate) sigma: CompressedRistretto,
     pub(crate) tau: CompressedRistretto,
     pub(crate) rho_vec: Vec<CompressedRistretto>,
-    pub(crate) z_vec: Vec<Scalar>
+    pub(crate) z_vec: Vec<Scalar>,
 
     // These are for debugging purposes only, will be removed lated
-    /* pub(crate) TESTx: Vec<Scalar>,
+    pub(crate) TESTx: Vec<Scalar>,
     pub(crate) TESTGf: RistrettoPoint,
     pub(crate) TESTHf: RistrettoPoint,
-    pub(crate) TESTUf: RistrettoPoint, */
+    pub(crate) TESTUf: RistrettoPoint
 }
 
 impl ZKMatrixFoldingProof {
@@ -107,7 +107,13 @@ impl ZKMatrixFoldingProof {
         // Debugging: store challenges explicitly so we can check to be sure challenges
         // are recovered properly in verification.
         // Obviously this will NOT be part of the actual protocol
-        // let mut TESTchall = Vec::with_capacity(lg_n + lg_m + lg_k);
+        let mut TESTchall = Vec::with_capacity(lg_n + lg_m + lg_k);
+        let mut P_vec = Vec::with_capacity(lg_m);
+        let c = tp_mat_mult(a, b, n, k);
+        let mut P_actual = RistrettoPoint::vartime_multiscalar_mul(
+            a.iter().chain(b.iter()).chain(c.iter()).chain(iter::once(&r)), 
+            G.iter().chain(H.iter()).chain(U.iter()).chain(iter::once(&g_0))
+        );
 
         // first fold A and B in inner product approach
         // This means we want A to hold the TRANSPOSE of whatever matrix we're actually using
@@ -148,13 +154,18 @@ impl ZKMatrixFoldingProof {
              // get challenge and its inverse
             let x = transcript.challenge_scalar(b"x");
             let x_inv = x.invert();
-            // TESTchall.push(x);
+
+            //debug
+            TESTchall.push(x);
 
             // update witness values and parameters
-            for i in 0..m {
+            for i in 0..(n*m) {
                 a_l[i] = x * a_l[i] + a_r[i];
-                b_t[i] = x_inv * b_t[i] + b_b[i];
                 G_l[i] = RistrettoPoint::vartime_multiscalar_mul(&[x_inv, one], &[G_l[i], G_r[i]]);
+            }
+
+            for i in 0..(m*k) {
+                b_t[i] = x_inv * b_t[i] + b_b[i];
                 H_t[i] = RistrettoPoint::vartime_multiscalar_mul(&[x, one], &[H_t[i], H_b[i]]);
             }
 
@@ -163,6 +174,20 @@ impl ZKMatrixFoldingProof {
             b = b_t;
             G = G_l;
             H = H_t;
+
+            //debug
+            let c = tp_mat_mult(a, b, n, k);
+            let P_expect = RistrettoPoint::vartime_multiscalar_mul(
+                a.iter().chain(b.iter()).chain(c.iter()).chain(iter::once(&r)), 
+                G.iter().chain(H.iter()).chain(U.iter()).chain(iter::once(&g_0))
+            );
+            let L_g = L.decompress().unwrap();
+            let R_g = R.decompress().unwrap();
+            P_actual = RistrettoPoint::vartime_multiscalar_mul(
+                iter::once(&x).chain(iter::once(&x_inv)).chain(iter::once(&one)),
+                iter::once(&L_g).chain(iter::once(&R_g)).chain(iter::once(&P_actual)));
+            assert_eq!(P_actual, P_expect);
+            P_vec.push(P_actual);
 
         }
 
@@ -176,15 +201,16 @@ impl ZKMatrixFoldingProof {
 
         let alpha = RistrettoPoint::vartime_multiscalar_mul(
             a.iter().chain(c.iter()).chain(iter::once(&q)),
-            G.iter().chain(U.iter()).chain(iter::once(&g_0)));
+            G.iter().chain(U.iter()).chain(iter::once(&g_0))
+        ).compress();
 
         let beta = RistrettoPoint::vartime_multiscalar_mul(
             b.iter().chain(iter::once(&r)), 
-            H.iter().chain(iter::once(&g_0)));
+            H.iter().chain(iter::once(&g_0))
+        ).compress();
         
-        // TODO: check whether clone is needed
-        transcript.append_point(b"a", &alpha.clone().compress());
-        transcript.append_point(b"b", &beta.clone().compress());
+        transcript.append_point(b"a", &alpha);
+        transcript.append_point(b"b", &beta);
 
 
         // Now, fold n (A)
@@ -198,20 +224,20 @@ impl ZKMatrixFoldingProof {
 
             // get cross terms for L and R
             // these are matrix multiplications :(
-            let c_l = tp_mat_mult(a_t, b, n, k);
-            let c_r = tp_mat_mult(a_b, b, n, k);
+            /* let c_l = tp_mat_mult(a_t, b, n, k);
+            let c_r = tp_mat_mult(a_b, b, n, k); */
 
             // gemerate blinding factors for L and R
             let q_l = Scalar::random(&mut rng);
             let q_r = Scalar::random(&mut rng);
 
             let L = RistrettoPoint::vartime_multiscalar_mul(
-                a_t.iter().chain(c_l.iter()).chain(iter::once(&q_l)), 
+                a_t.iter().chain(c_t.iter()).chain(iter::once(&q_l)), 
                 G_b.iter().chain(U_t.iter()).chain(iter::once(&g_0))
             ).compress(); 
 
             let R = RistrettoPoint::vartime_multiscalar_mul(
-                a_b.iter().chain(c_r.iter()).chain(iter::once(&q_r)), 
+                a_b.iter().chain(c_b.iter()).chain(iter::once(&q_r)), 
                 G_t.iter().chain(U_t.iter()).chain(iter::once(&g_0))
             ).compress();
 
@@ -227,6 +253,9 @@ impl ZKMatrixFoldingProof {
             let y = transcript.challenge_scalar(b"y");
             let y_inv = y.invert();
             
+            // debug
+            TESTchall.push(y);
+
             // compute new a, G
             for i in 0..n {
                 a_t[i] = y * a_t[i] + a_b[i];
@@ -256,15 +285,17 @@ impl ZKMatrixFoldingProof {
 
         let sigma = RistrettoPoint::vartime_multiscalar_mul(
             a.iter().chain(iter::once(&q)),
-            G.iter().chain(iter::once(&g_0)));
+            G.iter().chain(iter::once(&g_0))
+        ).compress();
 
         let tau = RistrettoPoint::vartime_multiscalar_mul(
             c.iter().chain(iter::once(&s)), 
-            U.iter().chain(iter::once(&g_0)));
+            U.iter().chain(iter::once(&g_0))
+        ).compress();
         
         // TODO: check whether clone is needed
-        transcript.append_point(b"s", &sigma.clone().compress());
-        transcript.append_point(b"t", &tau.clone().compress());
+        transcript.append_point(b"s", &sigma);
+        transcript.append_point(b"t", &tau);
 
         
         // now fold k/B
@@ -317,6 +348,9 @@ impl ZKMatrixFoldingProof {
             // get challenge and its inverse
             let z = transcript.challenge_scalar(b"z");
             let z_inv = z.invert();
+
+            // debug 
+            TESTchall.push(z);
 
             // compute new b, H
             for i in 0..k {
@@ -390,17 +424,17 @@ impl ZKMatrixFoldingProof {
             R_vec3_beta,
             L_vec3_tau,
             R_vec3_tau,
-            alpha: alpha.compress(),
-            beta: beta.compress(),
-            sigma: sigma.compress(),
-            tau: tau.compress(),
+            alpha: alpha,
+            beta: beta,
+            sigma: sigma,
+            tau: tau,
             rho_vec,
-            z_vec
+            z_vec,
             // fields below will be removed, for debugging only
-            /* TESTx: TESTchall,
+            TESTx: TESTchall,
             TESTGf: G[0],
             TESTHf: H[0],
-            TESTUf: U[0] */
+            TESTUf: U[0] 
         }
     }
 
@@ -444,9 +478,9 @@ impl ZKMatrixFoldingProof {
 
         // 1. Recompute challenges based on the proof transcript
 
-        let mut challenges1 = Vec::with_capacity(lg_n);
-        let mut challenges2 = Vec::with_capacity(lg_k);
-        let mut challenges3 = Vec::with_capacity(lg_m);
+        let mut challenges1 = Vec::with_capacity(lg_m);
+        let mut challenges2 = Vec::with_capacity(lg_n);
+        let mut challenges3 = Vec::with_capacity(lg_k);
 
         for (L, R) in self.L_vec1.iter().zip(self.R_vec1.iter()) {
             transcript.validate_and_append_point(b"L", L)?;
@@ -486,10 +520,10 @@ impl ZKMatrixFoldingProof {
         let zk_mult_chall = transcript.challenge_scalar(b"x");
 
         // Some debugging tests: ensure that challenges were correctly recovered
-        /* let mut TESTchall = challenges1.clone();
-        TESTchall.extend(&challenges3);
+        let mut TESTchall = challenges1.clone();
         TESTchall.extend(&challenges2);
-        assert_eq!(TESTchall, self.TESTx); */
+        TESTchall.extend(&challenges3);
+        assert_eq!(TESTchall, self.TESTx); 
 
         // Need various mixes of challenges & their inverses to begin computing s-vectors
         let mut challenges1_inv = challenges1.clone();
@@ -506,7 +540,7 @@ impl ZKMatrixFoldingProof {
         let mut challengesG = challenges1.clone();
         challengesG.extend(&challenges2);
         let mut challengesH = challenges1_inv.clone();
-        challengesH.extend(&challenges2);
+        challengesH.extend(&challenges3);
         let mut challengesU = challenges2.clone();
         challengesU.extend(&challenges3);
 
@@ -592,6 +626,7 @@ impl ZKMatrixFoldingProof {
         // debug
         println!("MINI-RED 1 CHECK");
         assert_eq!(alpha + beta, P_final);
+
         if alpha + beta != P_final {
             return Err(ProofError::VerificationError);
         }
@@ -884,8 +919,28 @@ mod tests {
     }
 
     #[test]
-    fn make_mfp_time_1() {
-        mfp_test_helper_create(1024,2048,512);
+    fn make_mfp_10() {
+        mfp_test_helper_create(2,2,1);
+    }
+
+    fn col_to_row(a: &Vec<Scalar>, n: usize, m: usize) -> Vec<Scalar> {
+        let mut aT = vec![Scalar::zero(); n*m];
+        for row in 0..n {
+            for col in 0..m {
+                aT[m*row + col] = a[n*col + row];
+            }
+        }
+        aT
+    }
+
+    fn row_to_col(b: &Vec<Scalar>, m: usize, k: usize) -> Vec<Scalar> {
+        let mut bT = vec![Scalar::zero(); m*k];
+        for row in 0..m {
+            for col in 0..k {
+                bT[m*col + row] = b[k*row + col];
+            }
+        }
+        bT
     }
 
     fn tp_mat_mult_test_helper(n: usize, m: usize, k: usize) {
@@ -894,9 +949,11 @@ mod tests {
         let b: Vec<_> = (0..(m*k)).map(|_| Scalar::random(&mut rng)).collect();
         let c = tp_mat_mult(&a, &b, n, k);
         
+        let aT = col_to_row(&a, n, m);
+        let bT = row_to_col(&b, m, k);
         for x in 0..n {
             for y in 0..k {
-                assert_eq!(inner_product(&a[x*m..(x+1)*m], &b[y*m..(y+1)*m]), c[k*x + y]);
+                assert_eq!(inner_product(&aT[x*m..(x+1)*m], &bT[y*m..(y+1)*m]), c[k*x + y]);
             }
         }
     }
@@ -922,7 +979,7 @@ mod tests {
     }
 
     #[test]
-    fn tp_m_test_5() {
+    fn tp_mm_test_5() {
         tp_mat_mult_test_helper(1,16,1);
     }
 

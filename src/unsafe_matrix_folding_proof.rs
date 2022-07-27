@@ -652,11 +652,6 @@ mod tests {
         mfp_test_helper_create(32,4,8);
     }
 
-    #[test]
-    fn make_mfp_time_1() {
-        mfp_test_helper_create(1024,2048,512);
-    }
-
     fn mat_mult_test_helper(n: usize, m: usize, k: usize) {
         let mut rng = rand::thread_rng();
         let a: Vec<_> = (0..(n*m)).map(|_| Scalar::random(&mut rng)).collect();
