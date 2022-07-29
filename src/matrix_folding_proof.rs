@@ -922,7 +922,7 @@ mod tests {
 
     #[test]
     fn make_mfp_10() {
-        mfp_test_helper_create(2,2,1);
+        mfp_test_helper_create(64,64,64);
     }
 
     fn col_to_row(a: &Vec<Scalar>, n: usize, m: usize) -> Vec<Scalar> {
@@ -1037,7 +1037,6 @@ mod tests {
         let setup_duration = setup_start.elapsed();
         // generate proof
         let mut prover = Transcript::new(b"matrixfoldingtest");
-        let create_start = Instant::now();
         let P = RistrettoPoint::vartime_multiscalar_mul(
             a.iter()
                 .chain(b.iter())
@@ -1048,6 +1047,7 @@ mod tests {
                 .chain(U.iter())
                 .chain(iter::once(&g_0))
         );
+        let create_start = Instant::now();
         let proof = ZKMatrixFoldingProof::create(
             &mut prover,
             G.clone(),
@@ -1062,8 +1062,6 @@ mod tests {
             k
         );
         let create_duration = create_start.elapsed();
-
-        
 
         let mut verifier = Transcript::new(b"matrixfoldingtest");
         let verify_start = Instant::now();
