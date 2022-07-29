@@ -545,7 +545,7 @@ impl ZKMatrixFoldingProof {
         challengesU.extend(&challenges3);
 
         let s_G0 = allinv1 * allinv2;
-        let s_H0 = all1 * allinv2;
+        let s_H0 = all1 * allinv3;
         let s_U0 = allinv2 * allinv3;
 
         // all the copying above might be unnecessary. this definitely will hurt performance
@@ -605,8 +605,19 @@ impl ZKMatrixFoldingProof {
     ) -> Result<(), ProofError> {
         //debug
         println!("BEGIN computations");
+
+
         let one = Scalar::one();
         let (x1, x2, x3, x1_inv, x2_inv, x3_inv, zk_mult_chall, s_G, s_H, s_U) = self.verification_scalars(n, m, k, transcript)?;
+
+
+        // debug
+        let G_actual = RistrettoPoint::vartime_multiscalar_mul(s_G.iter(), G.iter());
+        assert_eq!(G_actual, self.TESTGf);
+        let H_actual = RistrettoPoint::vartime_multiscalar_mul(s_H.iter(), H.iter());
+        assert_eq!(H_actual, self.TESTHf);
+        let U_actual = RistrettoPoint::vartime_multiscalar_mul(s_U.iter(), U.iter());
+        assert_eq!(U_actual, self.TESTUf);
 
         // check for mini-reduction 1
         let alpha = self.alpha.decompress().ok_or(ProofError::VerificationError)?;
