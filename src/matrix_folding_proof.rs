@@ -29,13 +29,13 @@ pub struct ZKMatrixFoldingProof {
     pub(crate) sigma: CompressedRistretto,
     pub(crate) tau: CompressedRistretto,
     pub(crate) rho_vec: Vec<CompressedRistretto>,
-    pub(crate) z_vec: Vec<Scalar>,
+    pub(crate) z_vec: Vec<Scalar>
 
     // These are for debugging purposes only, will be removed lated
-    pub(crate) TESTx: Vec<Scalar>,
+    /* pub(crate) TESTx: Vec<Scalar>,
     pub(crate) TESTGf: RistrettoPoint,
     pub(crate) TESTHf: RistrettoPoint,
-    pub(crate) TESTUf: RistrettoPoint
+    pub(crate) TESTUf: RistrettoPoint */
 }
 
 impl ZKMatrixFoldingProof {
@@ -48,19 +48,19 @@ impl ZKMatrixFoldingProof {
     /// The dimnsions of the matrices must all be powers of 2
     pub fn create(
         transcript: &mut Transcript,
-        mut G_vec: Vec<RistrettoPoint>, // say these are stored in row-major
+        mut G_vec: Vec<RistrettoPoint>,
         mut H_vec: Vec<RistrettoPoint>,
-        mut U_vec: Vec<RistrettoPoint>, // this used to be Q and was not a vector nor mutable
-        g_0: RistrettoPoint, // blinding group elements
-        mut a_vec: Vec<Scalar>, // A contains the TRANSPOSE of the matrix that is being used!!
-        mut b_vec: Vec<Scalar>,
+        mut U_vec: Vec<RistrettoPoint>, 
+        g_0: RistrettoPoint, // blinding group element
+        mut a_vec: Vec<Scalar>, // matrix A, stored column-major
+        mut b_vec: Vec<Scalar>, // row-major
         mut r: Scalar, // blinding exponent
-        mut n: usize, //not sure if these need to be mutable but I'm assuming yes
+        mut n: usize, 
         mut m: usize,
         mut k: usize
     ) -> ZKMatrixFoldingProof {
         // Create slices G, H, a, b backed by their respective
-        // vectors.  This lets us reslice as we compress the lengths
+        // vectors. This lets us reslice as we compress the lengths
         // of the vectors in the main loop below.
         let mut G = &mut G_vec[..];
         let mut H = &mut H_vec[..];
@@ -75,14 +75,14 @@ impl ZKMatrixFoldingProof {
         let mut rng = rand::thread_rng();
 
 
-        // All of the input vectors must have the same length.
+        // All of the input vectors must have the correct length
         assert_eq!(G.len(), n*m);
         assert_eq!(H.len(), m*k);
         assert_eq!(U.len(), n*k);
         assert_eq!(a.len(), n*m);
         assert_eq!(b.len(), m*k);
 
-        // All of the input vectors must have a length that is a power of two.
+        // All of the dimensions of matrices must be a power of two.
         assert!(n.is_power_of_two());
         assert!(m.is_power_of_two());
         assert!(k.is_power_of_two());
@@ -107,16 +107,16 @@ impl ZKMatrixFoldingProof {
         // Debugging: store challenges explicitly so we can check to be sure challenges
         // are recovered properly in verification.
         // Obviously this will NOT be part of the actual protocol
-        let mut TESTchall = Vec::with_capacity(lg_n + lg_m + lg_k);
+        /* let mut TESTchall = Vec::with_capacity(lg_n + lg_m + lg_k);
         let mut P_vec = Vec::with_capacity(lg_m);
         let c = tp_mat_mult(a, b, n, k);
         let mut P_actual = RistrettoPoint::vartime_multiscalar_mul(
             a.iter().chain(b.iter()).chain(c.iter()).chain(iter::once(&r)), 
             G.iter().chain(H.iter()).chain(U.iter()).chain(iter::once(&g_0))
-        );
+        ); */
 
-        // first fold A and B in inner product approach
-        // This means we want A to hold the TRANSPOSE of whatever matrix we're actually using
+        // first fold A and B with inner product approach
+        // A must be coloumn-major so that splitting in half correctly splits the matrix down the middle
         while m != 1 {
             m = m/2;
             let (a_l, a_r) = a.split_at_mut(m*n);
@@ -133,6 +133,7 @@ impl ZKMatrixFoldingProof {
             let r_l = Scalar::random(&mut rng);
             let r_r = Scalar::random(&mut rng);
 
+            // compute L and R
             let L = RistrettoPoint::vartime_multiscalar_mul(
                 a_l.iter().chain(b_b.iter()).chain(c_l.iter()).chain(iter::once(&r_l)), 
                 G_r.iter().chain(H_t.iter()).chain(U.iter()).chain(iter::once(&g_0))
@@ -143,11 +144,11 @@ impl ZKMatrixFoldingProof {
                 G_l.iter().chain(H_b.iter()).chain(U.iter()).chain(iter::once(&g_0))
             ).compress();
 
-             // add L R to records for return struct
+             // add L and R to records for return struct
              L_vec1.push(L);
              R_vec1.push(R);
  
-             // add L R to transcript
+             // add L and R to transcript
              transcript.append_point(b"L", &L);
              transcript.append_point(b"R", &R);  
 
@@ -155,10 +156,10 @@ impl ZKMatrixFoldingProof {
             let x = transcript.challenge_scalar(b"x");
             let x_inv = x.invert();
 
-            //debug
-            TESTchall.push(x);
+            //debug: store challenge so we can verify challenges are correctly computed in verification
+            // TESTchall.push(x);
 
-            // update witness values and parameters
+            // update witnesses and public parameters for recursion
             for i in 0..(n*m) {
                 a_l[i] = x * a_l[i] + a_r[i];
                 G_l[i] = RistrettoPoint::vartime_multiscalar_mul(&[x_inv, one], &[G_l[i], G_r[i]]);
@@ -175,8 +176,9 @@ impl ZKMatrixFoldingProof {
             G = G_l;
             H = H_t;
 
-            //debug
-            let c = tp_mat_mult(a, b, n, k);
+            //debug: check value of P' computed by verifier using L, P, R, x, matches theoretical value computed w 
+            // G, H, U, a, b, r.
+            /* let c = tp_mat_mult(a, b, n, k);
             let P_expect = RistrettoPoint::vartime_multiscalar_mul(
                 a.iter().chain(b.iter()).chain(c.iter()).chain(iter::once(&r)), 
                 G.iter().chain(H.iter()).chain(U.iter()).chain(iter::once(&g_0))
@@ -187,7 +189,7 @@ impl ZKMatrixFoldingProof {
                 iter::once(&x).chain(iter::once(&x_inv)).chain(iter::once(&one)),
                 iter::once(&L_g).chain(iter::once(&R_g)).chain(iter::once(&P_actual)));
             assert_eq!(P_actual, P_expect);
-            P_vec.push(P_actual);
+            P_vec.push(P_actual); */
 
         }
 
@@ -222,15 +224,11 @@ impl ZKMatrixFoldingProof {
             let (G_t, G_b) = G.split_at_mut(n);
             let (U_t, U_b) = U.split_at_mut(n*k);
 
-            // get cross terms for L and R
-            // these are matrix multiplications :(
-            /* let c_l = tp_mat_mult(a_t, b, n, k);
-            let c_r = tp_mat_mult(a_b, b, n, k); */
-
             // gemerate blinding factors for L and R
             let q_l = Scalar::random(&mut rng);
             let q_r = Scalar::random(&mut rng);
 
+            // compute L and R
             let L = RistrettoPoint::vartime_multiscalar_mul(
                 a_t.iter().chain(c_t.iter()).chain(iter::once(&q_l)), 
                 G_b.iter().chain(U_b.iter()).chain(iter::once(&g_0))
@@ -254,7 +252,7 @@ impl ZKMatrixFoldingProof {
             let y_inv = y.invert();
             
             // debug
-            TESTchall.push(y);
+            // TESTchall.push(y);
 
             // compute new a, G
             for i in 0..n {
@@ -293,7 +291,6 @@ impl ZKMatrixFoldingProof {
             U.iter().chain(iter::once(&g_0))
         ).compress();
         
-        // TODO: check whether clone is needed
         transcript.append_point(b"s", &sigma);
         transcript.append_point(b"t", &tau);
 
@@ -306,14 +303,13 @@ impl ZKMatrixFoldingProof {
             let (H_l, H_r) = H.split_at_mut(k);
             let (U_l, U_r) = U.split_at_mut(k);
 
-            // no need to compute cross-term exponents: AB_l is just C_l
-
             // blinding
             let r_l = Scalar::random(&mut rng);
             let r_r = Scalar::random(&mut rng);
             let s_l = Scalar::random(&mut rng);
             let s_r = Scalar::random(&mut rng);
 
+            // commitments: note we have 4 here, since we need 2 for beta and 2 for tau
             let L_beta = RistrettoPoint::vartime_multiscalar_mul(
                 b_l.iter().chain(iter::once(&r_l)), 
                 H_r.iter().chain(iter::once(&g_0))
@@ -334,6 +330,7 @@ impl ZKMatrixFoldingProof {
                 U_l.iter().chain(iter::once(&g_0))
             ).compress();
             
+            // store
             L_vec3_beta.push(L_beta);
             R_vec3_beta.push(R_beta);
             L_vec3_tau.push(L_tau);
@@ -350,7 +347,7 @@ impl ZKMatrixFoldingProof {
             let z_inv = z.invert();
 
             // debug 
-            TESTchall.push(z);
+            // TESTchall.push(z);
 
             // compute new b, H
             for i in 0..k {
@@ -429,24 +426,18 @@ impl ZKMatrixFoldingProof {
             sigma: sigma,
             tau: tau,
             rho_vec,
-            z_vec,
+            z_vec
             // fields below will be removed, for debugging only
-            TESTx: TESTchall,
+            /* TESTx: TESTchall,
             TESTGf: G[0],
             TESTHf: H[0],
-            TESTUf: U[0] 
+            TESTUf: U[0]  */
         }
     }
 
-    /// Computes three vectors of verification scalars \\([u\_{i}^{2}]\\), \\([u\_{i}^{-2}]\\) and \\([s\_{i}]\\) for combined multiscalar multiplication
-    /// in a parent protocol. See [inner product protocol notes](index.html#verification-equation) for details.
-    /// The verifier must provide the input length \\(n\\) explicitly to avoid unbounded allocation within the inner product proof.
-    /// 
-    /// added note from Aram: the linked page above is actually useful: https://doc-internal.dalek.rs/bulletproofs/inner_product_proof/index.html
-    /// note everything is written additively here, so products become sums and exponentiations become products
-    /// this verification equation matches the equation at the top of page 17 in the paper; s is the same as in the paper, but the u terms here are x terms in the paper
-    /// 
-    /// this method doesn't look like  it actually does any verification; it just returns the scalars needed for the verifier to do the verificatoin themselves
+    /// Computes verification scalars: the exponents of G, H and U used in verification to compute the final value of
+    /// these public parameters given the initial public parameters and the challenges used throughout.
+    /// works in a manner very similar to the original implementation in Bulletproofs
     pub(crate) fn verification_scalars(
         &self,
         n: usize,
@@ -472,11 +463,12 @@ impl ZKMatrixFoldingProof {
         }
 
         //debug
-        println!("Verification_scalars passed first checks");
+        // println!("Verification_scalars passed first checks");
 
         transcript.matrixfolding_domain_sep(n as u64, m as u64, k as u64);
 
         // 1. Recompute challenges based on the proof transcript
+        // add everything to transcript and get challenges, just like the Prover does 
 
         let mut challenges1 = Vec::with_capacity(lg_m);
         let mut challenges2 = Vec::with_capacity(lg_n);
@@ -520,12 +512,12 @@ impl ZKMatrixFoldingProof {
         let zk_mult_chall = transcript.challenge_scalar(b"x");
 
         // Some debugging tests: ensure that challenges were correctly recovered
-        let mut TESTchall = challenges1.clone();
+        /* let mut TESTchall = challenges1.clone();
         TESTchall.extend(&challenges2);
         TESTchall.extend(&challenges3);
-        assert_eq!(TESTchall, self.TESTx); 
+        assert_eq!(TESTchall, self.TESTx);  */
 
-        // Need various mixes of challenges & their inverses to begin computing s-vectors
+        // Need various mixes of challenges & their inverses to begin computing verification scalars
         let mut challenges1_inv = challenges1.clone();
         let allinv1 = Scalar::batch_invert(&mut challenges1_inv);
         let mut challenges2_inv = challenges2.clone();
@@ -548,16 +540,11 @@ impl ZKMatrixFoldingProof {
         let s_H0 = all1 * allinv3;
         let s_U0 = allinv2 * allinv3;
 
-        // all the copying above might be unnecessary. this definitely will hurt performance
-        // is there a way to replace with chained iterators? don't think so but that would 
-        // be nice
-
         // Compute s values inductively.
         let mut s_G = Vec::with_capacity(n*m);
         let mut s_H = Vec::with_capacity(m*k);
         let mut s_U = Vec::with_capacity(n*k);
 
-        // compute G scalars (I think this code works fine just ripped straight from original)
         s_G.push(s_G0);
         for i in 1..(n*m) {
             let lg_i = (32 - 1 - (i as u32).leading_zeros()) as usize;
@@ -581,15 +568,11 @@ impl ZKMatrixFoldingProof {
             let x_lg_i = challengesU[(lg_n + lg_k - 1) - lg_i];
             s_U.push(s_U[i - b] * x_lg_i);
         }
-        //assert_eq!(s_G[n*m - 1], Scalar::one());
-        //assert_eq!(s_G[0], challenges1_inv[0]);
+
         Ok((challenges1, challenges2, challenges3, challenges1_inv, challenges2_inv, challenges3_inv, zk_mult_chall, s_G, s_H, s_U))
     }
 
-    /// This method is for testing that proof generation works,
-    /// but for efficiency the actual protocols would use `verification_scalars`
-    /// method to combine inner product verification with other checks
-    /// in a single multiscalar multiplication.
+    /// Perform verification
     #[allow(dead_code)]
     pub fn verify(
         &self,
@@ -604,24 +587,26 @@ impl ZKMatrixFoldingProof {
         k: usize
     ) -> Result<(), ProofError> {
         //debug
-        println!("BEGIN computations");
+        // println!("BEGIN computations");
 
 
         let one = Scalar::one();
         let (x1, x2, x3, x1_inv, x2_inv, x3_inv, zk_mult_chall, s_G, s_H, s_U) = self.verification_scalars(n, m, k, transcript)?;
 
 
-        // debug
-        let G_actual = RistrettoPoint::vartime_multiscalar_mul(s_G.iter(), G.iter());
+        // debug: check the verification scalars (exponents for G H U) were computed correctly
+        /* let G_actual = RistrettoPoint::vartime_multiscalar_mul(s_G.iter(), G.iter());
         assert_eq!(G_actual, self.TESTGf);
         let H_actual = RistrettoPoint::vartime_multiscalar_mul(s_H.iter(), H.iter());
         assert_eq!(H_actual, self.TESTHf);
         let U_actual = RistrettoPoint::vartime_multiscalar_mul(s_U.iter(), U.iter());
-        assert_eq!(U_actual, self.TESTUf);
+        assert_eq!(U_actual, self.TESTUf); */
 
         // check for mini-reduction 1
         let alpha = self.alpha.decompress().ok_or(ProofError::VerificationError)?;
         let beta = self.beta.decompress().ok_or(ProofError::VerificationError)?;
+        // need final value of P after done with Phi_1 (i.e., once m == 1)
+        // so we need all the Ls and Rs
         let Ls = 
             self.L_vec1.iter()
             .map(|p| p.decompress().ok_or(ProofError::VerificationError))
@@ -635,8 +620,8 @@ impl ZKMatrixFoldingProof {
             Ls.iter().chain(Rs.iter()).chain(iter::once(P))
         );
         // debug
-        println!("MINI-RED 1 CHECK");
-        assert_eq!(alpha + beta, P_final);
+        /* println!("MINI-RED 1 CHECK");
+        assert_eq!(alpha + beta, P_final); */
 
         if alpha + beta != P_final {
             return Err(ProofError::VerificationError);
@@ -645,7 +630,7 @@ impl ZKMatrixFoldingProof {
         // check for mini-reduction 2
         let sigma = self.sigma.decompress().ok_or(ProofError::VerificationError)?;
         let tau = self.tau.decompress().ok_or(ProofError::VerificationError)?;
-        // need to compute value of alpha after all runs of reduction Phi2 
+        // need to compute value of alpha after all runs of reduction Phi2 (once n == 1)
         let alpha_Ls = 
             self.L_vec2.iter()
             .map(|p| p.decompress().ok_or(ProofError::VerificationError))
@@ -659,13 +644,15 @@ impl ZKMatrixFoldingProof {
             alpha_Ls.iter().chain(alpha_Rs.iter()).chain(iter::once(&alpha)));
         
         //debug
-        assert_eq!(sigma + beta + tau, alpha_final + beta);
+        // assert_eq!(sigma + beta + tau, alpha_final + beta);
+
         if sigma + beta + tau != alpha_final + beta {
             return Err(ProofError::VerificationError);
         }
 
         // check for mini-reduction 3
-        // don't combine computation of beta_final and tau_final into single op b/c separate vals will be needed later
+        // this one is different: still need the final values of beta and tau
+        // but also need to get the other values used in the checks for mini-reduction 3
         let beta_Ls = 
             self.L_vec3_beta.iter()
             .map(|p| p.decompress().ok_or(ProofError::VerificationError))
@@ -676,9 +663,6 @@ impl ZKMatrixFoldingProof {
             .collect::<Result<Vec<_>, _>>()?;
         let beta_points = 
             beta_Ls.iter().chain(beta_Rs.iter()).chain(iter::once(&beta));
-        /* let beta_final = RistrettoPoint::vartime_multiscalar_mul(
-            x3.iter().chain(x3_inv.iter()).chain(iter::once(&one)), 
-            beta_Ls.iter().chain(beta_Rs.iter()).chain(iter::once(&beta))); */
         
         let tau_Ls = 
             self.L_vec3_tau.iter()
@@ -690,9 +674,6 @@ impl ZKMatrixFoldingProof {
             .collect::<Result<Vec<_>, _>>()?;
         let tau_points = 
             tau_Ls.iter().chain(tau_Rs.iter()).chain(iter::once(&tau));
-        /* let tau_final = RistrettoPoint::vartime_multiscalar_mul(
-            x3.iter().chain(x3_inv.iter()).chain(iter::once(&one)), 
-            tau_Ls.iter().chain(tau_Rs.iter()).chain(iter::once(&tau))); */
         
         // compute remaining exponents for verification equation (for G and H and U terms)
         let g_exp = s_G.iter().map(|s_i| self.z_vec[0] * s_i);
@@ -729,7 +710,8 @@ impl ZKMatrixFoldingProof {
                 .chain(iter::once(&sigma)));
         
         //debug
-        assert_eq!(check1, rho[0]);
+        // assert_eq!(check1, rho[0]);
+
         if check1 != rho[0] {
             return Err(ProofError::VerificationError);
         }
@@ -745,7 +727,8 @@ impl ZKMatrixFoldingProof {
         );
         
         //debug
-        assert_eq!(check2, rho[1]);
+        // assert_eq!(check2, rho[1]);
+
         if check2 != rho[1] {
             return Err(ProofError::VerificationError);
         }
@@ -761,11 +744,15 @@ impl ZKMatrixFoldingProof {
                 .chain(iter::once(&rho[3]))
                 .chain(tau_points)
             );
-        
-        assert_eq!(check3, rho[2]);
+
+        // debug
+        // assert_eq!(check3, rho[2]);
+
         if check3 != rho[2] {
             return Err(ProofError::VerificationError);
         }
+
+        // combine all these checks into one?
 
         Ok(())
     }
@@ -775,8 +762,7 @@ impl ZKMatrixFoldingProof {
 // a should have n rows and b should have k columns
 pub fn tp_mat_mult(a: &[Scalar], b: &[Scalar], n: usize, k: usize) -> Vec<Scalar> {
     let mut c = Vec::with_capacity(n*k);
-    // let m = a.len()/n;
-    // assert_eq!(m, b.len()/k);
+
     for i in 0..n {
         for j in 0..k {
             let a_row = a.iter().skip(i).step_by(n);
@@ -807,7 +793,6 @@ pub fn inner_product(a: &[Scalar], b: &[Scalar]) -> Scalar {
     out
 }
 
-// below are the debugging tests
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -835,10 +820,6 @@ mod tests {
         let c = tp_mat_mult(&a, &b, n, k);
         let r = Scalar::random(&mut rng);
 
-        // debugging check: be sure matrix multiplication matches inner product if applicable
-        /* if n == 1 && k == 1 {
-           assert_eq!(c[0], inner_product(&a, &b));
-        } */
 
         // Compute commitment P
         let P = RistrettoPoint::vartime_multiscalar_mul(
