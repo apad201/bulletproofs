@@ -1036,54 +1036,70 @@ mod tests {
         let (G, H, U, g_0, a, b, c, r) = mfp_timing_setup(n, m, k);
         let setup_duration = setup_start.elapsed();
         // generate proof
-        let mut prover = Transcript::new(b"matrixfoldingtest");
-        let P = RistrettoPoint::vartime_multiscalar_mul(
-            a.iter()
-                .chain(b.iter())
-                .chain(c.iter())
-                .chain(iter::once(&r)),
-            G.iter()
-                .chain(H.iter())
-                .chain(U.iter())
-                .chain(iter::once(&g_0))
-        );
-        let create_start = Instant::now();
-        let proof = ZKMatrixFoldingProof::create(
-            &mut prover,
-            G.clone(),
-            H.clone(),
-            U.clone(),
-            g_0.clone(),
-            a.clone(),
-            b.clone(),
-            r.clone(),
-            n,
-            m,
-            k
-        );
-        let create_duration = create_start.elapsed();
+        let mut create_durations: Vec<f32> = Vec::with_capacity(10);
+        let mut verify_durations: Vec<f32> = Vec::with_capacity(10);
+        let num = 1;
+        for _i in 0..num{
+            let mut prover = Transcript::new(b"matrixfoldingtest");
+            let P = RistrettoPoint::vartime_multiscalar_mul(
+                a.iter()
+                    .chain(b.iter())
+                    .chain(c.iter())
+                    .chain(iter::once(&r)),
+                G.iter()
+                    .chain(H.iter())
+                    .chain(U.iter())
+                    .chain(iter::once(&g_0))
+            );
+            let create_start = Instant::now();
+            let proof = ZKMatrixFoldingProof::create(
+                &mut prover,
+                G.clone(),
+                H.clone(),
+                U.clone(),
+                g_0.clone(),
+                a.clone(),
+                b.clone(),
+                r.clone(),
+                n,
+                m,
+                k
+            );
+            let create_duration = create_start.elapsed();
+    
+            let mut verifier = Transcript::new(b"matrixfoldingtest");
+            let verify_start = Instant::now();
+            assert!(proof.verify(
+                &mut verifier,
+                &P,
+                &G[..],
+                &H[..],
+                &U[..],
+                &g_0,
+                n,
+                m,
+                k
+            )
+                .is_ok());
+            let verify_duration = verify_start.elapsed();
+            create_durations.push(create_duration.as_secs_f32());
+            verify_durations.push(verify_duration.as_secs_f32());
+        }
+        
+        let mut create_avg: f32 = 0.0;
+        for val in create_durations {
+            create_avg += val/(num as f32);
+        }
 
-        let mut verifier = Transcript::new(b"matrixfoldingtest");
-        let verify_start = Instant::now();
-        assert!(proof.verify(
-            &mut verifier,
-            &P,
-            &G[..],
-            &H[..],
-            &U[..],
-            &g_0,
-            n,
-            m,
-            k
-        )
-            .is_ok());
-        let verify_duration = verify_start.elapsed();
-
+        let mut verify_avg: f32 = 0.0;
+        for val in verify_durations {
+            verify_avg += val/(num as f32);
+        }
         println!("SIZE n={}, m={}, k={}. DURATION setup={}, create={}, verify={}", 
-                n, m, k, 
-                setup_duration.as_secs_f32(),
-                create_duration.as_secs_f32(),
-                verify_duration.as_secs_f32()
+                n, m, k,
+                setup_duration.as_secs_f32(), 
+                create_avg,
+                verify_avg
                 );
     }
 
