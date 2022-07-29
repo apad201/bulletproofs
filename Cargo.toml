@@ -32,7 +32,7 @@ clear_on_drop = { version = "0.2", default-features = false }
 
 [dev-dependencies]
 hex = "0.3"
-criterion = "0.3"
+criterion = { version = '0.3', features=['real_blackbox'] }
 bincode = "1"
 rand_chacha = "0.3"
 
@@ -65,3 +65,7 @@ harness = false
 name = "r1cs"
 harness = false
 required-features = ["yoloproofs", "avx2_backend"]
+
+[[bench]]
+name = "folding"
+harness = false

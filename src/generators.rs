@@ -286,11 +286,13 @@ impl<'a> BulletproofGensShare<'a> {
     }
 }
 
-
+/// Generators for matrix folding proof
 pub struct MatrixFoldingGens {
-    /// The maximum number of usable generators for each party.
+    /// first dimension of A
     pub n: usize,
+    /// second dim of A/first of B
     pub m: usize,
+    /// second dim of B
     pub k: usize,
     /// Precomputed \\(\mathbf G\\) generators for each party.
     G_vec: Vec<RistrettoPoint>,

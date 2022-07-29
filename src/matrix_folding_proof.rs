@@ -793,6 +793,16 @@ pub fn inner_product(a: &[Scalar], b: &[Scalar]) -> Scalar {
     out
 }
 
+pub fn get_gens(n: usize, m: usize, k: usize) -> (Vec<RistrettoPoint>, Vec<RistrettoPoint>, Vec<RistrettoPoint>, RistrettoPoint) {
+    use crate::generators::MatrixFoldingGens;
+    let mf_gens = MatrixFoldingGens::new(n, m, k);
+    let G: Vec<RistrettoPoint> = mf_gens.G();
+    let H: Vec<RistrettoPoint> = mf_gens.H();
+    let U: Vec<RistrettoPoint> = mf_gens.U();
+    let g_0 = mf_gens.g_0().unwrap();
+    (G, H, U, g_0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1018,6 +1028,8 @@ mod tests {
         let c = tp_mat_mult(&a, &b, n, k);
         (G, H, U, g_0, a, b, c, r)
     }
+
+
 
     fn mfp_timing_helper(n: usize, m: usize, k: usize) {
         let setup_start = Instant::now();
