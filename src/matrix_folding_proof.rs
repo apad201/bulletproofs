@@ -233,7 +233,7 @@ impl ZKMatrixFoldingProof {
 
             let L = RistrettoPoint::vartime_multiscalar_mul(
                 a_t.iter().chain(c_t.iter()).chain(iter::once(&q_l)), 
-                G_b.iter().chain(U_t.iter()).chain(iter::once(&g_0))
+                G_b.iter().chain(U_b.iter()).chain(iter::once(&g_0))
             ).compress(); 
 
             let R = RistrettoPoint::vartime_multiscalar_mul(
