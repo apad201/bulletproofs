@@ -304,18 +304,10 @@ pub struct MatrixFoldingGens {
 
 
 impl MatrixFoldingGens {
-    /// Create a new `BulletproofGens` object.
-    ///
-    /// # Inputs
-    ///
-    /// * `gens_capacity` is the number of generators to precompute
-    ///    for each party.  For rangeproofs, it is sufficient to pass
-    ///    `64`, the maximum bitsize of the rangeproofs.  For circuit
-    ///    proofs, the capacity must be greater than the number of
-    ///    multipliers, rounded up to the next power of two.
-    ///
-    /// * `party_capacity` is the maximum number of parties that can
-    ///    produce an aggregated proof.
+    /// Create a new "MatrixFoldingGens" object.
+    /// parameters give the size of the matrices for which the generators 
+    /// are needed. Specifically, G will be n x m, H will be m x k, and U will be n x k.
+    /// g_0 is the group element to hold the blinding factors.
     pub fn new(new_n: usize, new_m: usize, new_k: usize) -> Self {
         let g_0 = GeneratorsChain::new(b"0").take(1).next();
         let mut gens = MatrixFoldingGens {
@@ -364,7 +356,7 @@ impl MatrixFoldingGens {
         self.k = new_k;
     }
 
-    /// Return G vectors
+    /// Functions to return the 
     pub(crate) fn G(&self) -> Vec<RistrettoPoint> {
         self.G_vec.clone()
     }
