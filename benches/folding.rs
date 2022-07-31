@@ -7,7 +7,7 @@ extern crate criterion;
 
 use std::iter;
 
-use criterion::Criterion;
+use criterion::{Criterion, SamplingMode};
 use bulletproofs::{ZKMatrixFoldingProof, get_gens, tp_mat_mult};
 use curve25519_dalek::ristretto::RistrettoPoint;
 use curve25519_dalek::scalar::Scalar;
@@ -17,6 +17,7 @@ use merlin::Transcript;
 fn prove_square_folding(crit: &mut Criterion) {
 
     let mut group = crit.benchmark_group("prove_square_folding");
+    group.sampling_mode(SamplingMode::Flat);
     let range = [1,2,4,8,16,32,64];
     for n in range.iter().map(|x| *x as usize) {
         for m in range.iter().map(|x| *x as usize) {
@@ -57,6 +58,7 @@ fn prove_square_folding(crit: &mut Criterion) {
 
 fn verify_square_folding(crit: &mut Criterion) {
     let mut group = crit.benchmark_group("verify_square_folding");
+    group.sampling_mode(SamplingMode::Flat);
     let range = [1,2,4,8,16,32,64];
     for n in range.iter().map(|x| *x as usize) {
         for m in range.iter().map(|x| *x as usize) {
@@ -121,4 +123,4 @@ criterion_group!(folding_prove, prove_square_folding);
 
 criterion_group!(folding_verify, verify_square_folding);
 
-criterion_main!(folding_prove);
+criterion_main!(folding_prove, folding_verify);
