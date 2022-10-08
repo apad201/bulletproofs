@@ -24,7 +24,6 @@ pub struct UnsafeMatrixFoldingProof {
     pub(crate) R_vec2: Vec<CompressedRistretto>,
     pub(crate) a: Scalar,
     pub(crate) b: Scalar,
-
     // These are for debugging purposes only, will be removed lated
     /* pub(crate) TESTx: Vec<Scalar>,
     pub(crate) TESTGf: RistrettoPoint,
@@ -50,7 +49,7 @@ impl UnsafeMatrixFoldingProof {
         mut c_vec: Vec<Scalar>,
         mut n: usize, //not sure if these need to be mutable but I'm assuming yes
         mut m: usize,
-        mut k: usize
+        mut k: usize,
     ) -> UnsafeMatrixFoldingProof {
         // Create slices G, H, a, b backed by their respective
         // vectors.  This lets us reslice as we compress the lengths
@@ -62,16 +61,15 @@ impl UnsafeMatrixFoldingProof {
         let mut b = &mut b_vec[..];
         let mut c = &mut c_vec[..];
 
-
         let one = Scalar::one();
 
         // All of the input vectors must have the same length.
-        assert_eq!(G.len(), n*m);
-        assert_eq!(H.len(), m*k);
-        assert_eq!(U.len(), n*k);
-        assert_eq!(a.len(), n*m);
-        assert_eq!(b.len(), m*k);
-        assert_eq!(c.len(), n*k);
+        assert_eq!(G.len(), n * m);
+        assert_eq!(H.len(), m * k);
+        assert_eq!(U.len(), n * k);
+        assert_eq!(a.len(), n * m);
+        assert_eq!(b.len(), m * k);
+        assert_eq!(c.len(), n * k);
 
         // All of the input vectors must have a length that is a power of two.
         assert!(n.is_power_of_two());
@@ -79,12 +77,12 @@ impl UnsafeMatrixFoldingProof {
         assert!(k.is_power_of_two());
 
         // begin the transcript
-        transcript.matrixfolding_domain_sep(n as u64, m as u64, k as u64); 
+        transcript.matrixfolding_domain_sep(n as u64, m as u64, k as u64);
 
         let lg_n = n.next_power_of_two().trailing_zeros() as usize;
-        let lg_m = m.next_power_of_two().trailing_zeros() as usize; 
+        let lg_m = m.next_power_of_two().trailing_zeros() as usize;
         let lg_k = k.next_power_of_two().trailing_zeros() as usize;
-        
+
         // create vectors for L and R values
         // 1 vecs are for folding A and C, 3 vecs for folding B and C, 2 vecs for folding A and B
         // will be used in order 1 -> 3 -> 2 to avoid taking transposes
@@ -103,22 +101,24 @@ impl UnsafeMatrixFoldingProof {
         // first fold A vertically
         while n != 1 {
             // fold A and G vertically
-            n = n/2;
-            let (a_t, a_b) = a.split_at_mut(n*m);
-            let (c_t, c_b) = c.split_at_mut(n*k);
-            let (G_t, G_b) = G.split_at_mut(n*m);
-            let (U_t, U_b) = U.split_at_mut(n*k);
+            n = n / 2;
+            let (a_t, a_b) = a.split_at_mut(n * m);
+            let (c_t, c_b) = c.split_at_mut(n * k);
+            let (G_t, G_b) = G.split_at_mut(n * m);
+            let (U_t, U_b) = U.split_at_mut(n * k);
 
             // compute L and R
             let L = RistrettoPoint::vartime_multiscalar_mul(
-                a_t.iter().chain(c_t.iter()), 
-                G_b.iter().chain(U_b.iter())
-            ).compress();
+                a_t.iter().chain(c_t.iter()),
+                G_b.iter().chain(U_b.iter()),
+            )
+            .compress();
 
             let R = RistrettoPoint::vartime_multiscalar_mul(
                 a_b.iter().chain(c_b.iter()),
-                G_t.iter().chain(U_t.iter())
-            ).compress();
+                G_t.iter().chain(U_t.iter()),
+            )
+            .compress();
 
             // add L R to records for return struct
             L_vec1.push(L);
@@ -126,7 +126,7 @@ impl UnsafeMatrixFoldingProof {
 
             // add L R to transcript
             transcript.append_point(b"L", &L);
-            transcript.append_point(b"R", &R);      
+            transcript.append_point(b"R", &R);
 
             // get challenge and its inverse
             let x = transcript.challenge_scalar(b"x");
@@ -134,13 +134,13 @@ impl UnsafeMatrixFoldingProof {
             // for debugging: add challenge to record
             // TESTchall.push(x);
             // compute a', G'
-            for i in 0..(n*m) {
+            for i in 0..(n * m) {
                 a_t[i] = x * a_t[i] + a_b[i];
                 G_t[i] = RistrettoPoint::vartime_multiscalar_mul(&[x_inv, one], &[G_t[i], G_b[i]]);
             }
 
             // compute c', U'
-            for i in 0..(n*k) {
+            for i in 0..(n * k) {
                 c_t[i] = x * c_t[i] + c_b[i];
                 U_t[i] = RistrettoPoint::vartime_multiscalar_mul(&[x_inv, one], &[U_t[i], U_b[i]]);
             }
@@ -152,30 +152,31 @@ impl UnsafeMatrixFoldingProof {
             U = U_t;
         }
 
-
         // now fold B horizontally (i.e. fold b, which stores B^T, vertically)
-        // Technically we need to find transpose of C (since it must also be folded horizontally), 
+        // Technically we need to find transpose of C (since it must also be folded horizontally),
         // but since A is now a row vector, C is a row vector, so we can just
         // "re-interpret" it as a column vector and no actual work is needed to transpose it! which is very nice
         // confirm that n=1 by this point:
         // assert_eq!(n,1);
         while k != 1 {
-            k = k/2;
-            let (b_l, b_r) = b.split_at_mut(m*k);
+            k = k / 2;
+            let (b_l, b_r) = b.split_at_mut(m * k);
             let (c_l, c_r) = c.split_at_mut(k); // n == 1 by the time we get here
-            let (H_l, H_r) = H.split_at_mut(m*k);
+            let (H_l, H_r) = H.split_at_mut(m * k);
             let (U_l, U_r) = U.split_at_mut(k);
 
             // compute L and R
             let L = RistrettoPoint::vartime_multiscalar_mul(
-                b_l.iter().chain(c_l.iter()), 
-                H_r.iter().chain(U_r.iter())
-            ).compress();
+                b_l.iter().chain(c_l.iter()),
+                H_r.iter().chain(U_r.iter()),
+            )
+            .compress();
 
             let R = RistrettoPoint::vartime_multiscalar_mul(
                 b_r.iter().chain(c_r.iter()),
-                H_l.iter().chain(U_l.iter())
-            ).compress();
+                H_l.iter().chain(U_l.iter()),
+            )
+            .compress();
 
             // add L R to records for return struct
             L_vec3.push(L);
@@ -183,7 +184,7 @@ impl UnsafeMatrixFoldingProof {
 
             // add L R to transcript
             transcript.append_point(b"L", &L);
-            transcript.append_point(b"R", &R);      
+            transcript.append_point(b"R", &R);
 
             // get challenge and its inverse
             let x = transcript.challenge_scalar(b"x");
@@ -191,7 +192,7 @@ impl UnsafeMatrixFoldingProof {
             // TESTchall.push(x);
 
             // compute new b', H', c', U'
-            for i in 0..(m*k) {
+            for i in 0..(m * k) {
                 b_l[i] = x * b_l[i] + b_r[i];
                 H_l[i] = RistrettoPoint::vartime_multiscalar_mul(&[x_inv, one], &[H_l[i], H_r[i]]);
             }
@@ -206,8 +207,8 @@ impl UnsafeMatrixFoldingProof {
             c = c_l;
             U = U_l;
         }
-     
-        // now a is 1 x m and b is m x 1 and c is 1 x 1. 
+
+        // now a is 1 x m and b is m x 1 and c is 1 x 1.
         // because b stores B^T, which is a row vector, which we can reinterpret as the column vector B! yay
         // at this point it is just an inner product proof
         // to confirm that folding in other dimensions is done:
@@ -215,7 +216,7 @@ impl UnsafeMatrixFoldingProof {
         assert_eq!(n,1);
         assert_eq!(U.len(),1); */
         while m != 1 {
-            m = m/2;
+            m = m / 2;
             let (a_l, a_r) = a.split_at_mut(m);
             let (b_t, b_b) = b.split_at_mut(m);
             let (G_l, G_r) = G.split_at_mut(m);
@@ -226,24 +227,26 @@ impl UnsafeMatrixFoldingProof {
             let c_r = inner_product(a_r, b_t);
 
             let L = RistrettoPoint::vartime_multiscalar_mul(
-                a_l.iter().chain(b_b.iter().chain(iter::once(&c_l))), 
-                G_r.iter().chain(H_t.iter().chain(U.iter()))
-            ).compress(); // at this point U should have length 1
+                a_l.iter().chain(b_b.iter().chain(iter::once(&c_l))),
+                G_r.iter().chain(H_t.iter().chain(U.iter())),
+            )
+            .compress(); // at this point U should have length 1
 
             let R = RistrettoPoint::vartime_multiscalar_mul(
-                a_r.iter().chain(b_t.iter().chain(iter::once(&c_r))), 
-                G_l.iter().chain(H_b.iter().chain(U.iter()))
-            ).compress();
+                a_r.iter().chain(b_t.iter().chain(iter::once(&c_r))),
+                G_l.iter().chain(H_b.iter().chain(U.iter())),
+            )
+            .compress();
 
-             // add L R to records for return struct
-             L_vec2.push(L);
-             R_vec2.push(R);
- 
-             // add L R to transcript
-             transcript.append_point(b"L", &L);
-             transcript.append_point(b"R", &R);  
+            // add L R to records for return struct
+            L_vec2.push(L);
+            R_vec2.push(R);
 
-             // get challenge and its inverse
+            // add L R to transcript
+            transcript.append_point(b"L", &L);
+            transcript.append_point(b"R", &R);
+
+            // get challenge and its inverse
             let x = transcript.challenge_scalar(b"x");
             let x_inv = x.invert();
             // TESTchall.push(x);
@@ -259,7 +262,6 @@ impl UnsafeMatrixFoldingProof {
             b = b_t;
             G = G_l;
             H = H_t;
-
         }
         // return value
         // note proof keeps its own record of L and R terms from each iteration, separate from transcript
@@ -272,7 +274,6 @@ impl UnsafeMatrixFoldingProof {
             R_vec2: R_vec2,
             a: a[0],
             b: b[0],
-
             // fields below will be removed, for debugging only
             /* TESTx: TESTchall,
             TESTGf: G[0],
@@ -284,11 +285,11 @@ impl UnsafeMatrixFoldingProof {
     /// Computes three vectors of verification scalars \\([u\_{i}^{2}]\\), \\([u\_{i}^{-2}]\\) and \\([s\_{i}]\\) for combined multiscalar multiplication
     /// in a parent protocol. See [inner product protocol notes](index.html#verification-equation) for details.
     /// The verifier must provide the input length \\(n\\) explicitly to avoid unbounded allocation within the inner product proof.
-    /// 
+    ///
     /// added note from Aram: the linked page above is actually useful: https://doc-internal.dalek.rs/bulletproofs/inner_product_proof/index.html
     /// note everything is written additively here, so products become sums and exponentiations become products
     /// this verification equation matches the equation at the top of page 17 in the paper; s is the same as in the paper, but the u terms here are x terms in the paper
-    /// 
+    ///
     /// this method doesn't look like  it actually does any verification; it just returns the scalars needed for the verifier to do the verificatoin themselves
     pub(crate) fn verification_scalars(
         &self,
@@ -296,7 +297,20 @@ impl UnsafeMatrixFoldingProof {
         m: usize,
         k: usize,
         transcript: &mut Transcript,
-    ) -> Result<(Vec<Scalar>, Vec<Scalar>, Vec<Scalar>, Vec<Scalar>, Vec<Scalar>, Vec<Scalar>, Vec<Scalar>, Vec<Scalar>, Vec<Scalar>), ProofError> {
+    ) -> Result<
+        (
+            Vec<Scalar>,
+            Vec<Scalar>,
+            Vec<Scalar>,
+            Vec<Scalar>,
+            Vec<Scalar>,
+            Vec<Scalar>,
+            Vec<Scalar>,
+            Vec<Scalar>,
+            Vec<Scalar>,
+        ),
+        ProofError,
+    > {
         let lg_n = self.L_vec1.len();
         let lg_m = self.L_vec2.len();
         let lg_k = self.L_vec3.len();
@@ -365,33 +379,33 @@ impl UnsafeMatrixFoldingProof {
         let s_U0 = allinv1 * allinv3;
 
         // all the copying above might be unnecessary. this definitely will hurt performance
-        // is there a way to replace with chained iterators? don't think so but that would 
+        // is there a way to replace with chained iterators? don't think so but that would
         // be nice
 
         // Compute s values inductively.
-        let mut s_G = Vec::with_capacity(n*m);
-        let mut s_H = Vec::with_capacity(m*k);
-        let mut s_U = Vec::with_capacity(n*k);
+        let mut s_G = Vec::with_capacity(n * m);
+        let mut s_H = Vec::with_capacity(m * k);
+        let mut s_U = Vec::with_capacity(n * k);
 
         // compute G scalars (I think this code works fine just ripped straight from original)
         s_G.push(s_G0);
-        for i in 1..(n*m) {
+        for i in 1..(n * m) {
             let lg_i = (32 - 1 - (i as u32).leading_zeros()) as usize;
-            let b = 1 << lg_i; 
+            let b = 1 << lg_i;
             let x_lg_i = challengesG[(lg_n + lg_m - 1) - lg_i];
             s_G.push(s_G[i - b] * x_lg_i);
         }
 
         s_H.push(s_H0);
-        for i in 1..(m*k) {
+        for i in 1..(m * k) {
             let lg_i = (32 - 1 - (i as u32).leading_zeros()) as usize;
-            let b = 1 << lg_i; 
+            let b = 1 << lg_i;
             let x_lg_i = challengesH[(lg_m + lg_k - 1) - lg_i];
             s_H.push(s_H[i - b] * x_lg_i);
         }
 
-        s_U.push(s_U0); 
-        for i in 1..(n*k) {
+        s_U.push(s_U0);
+        for i in 1..(n * k) {
             let lg_i = (32 - 1 - (i as u32).leading_zeros()) as usize;
             let b = 1 << lg_i;
             let x_lg_i = challengesU[(lg_n + lg_k - 1) - lg_i];
@@ -399,7 +413,17 @@ impl UnsafeMatrixFoldingProof {
         }
         //assert_eq!(s_G[n*m - 1], Scalar::one());
         //assert_eq!(s_G[0], challenges1_inv[0]);
-        Ok((challenges1, challenges3, challenges2, challenges1_inv, challenges3_inv, challenges2_inv, s_G, s_H, s_U))
+        Ok((
+            challenges1,
+            challenges3,
+            challenges2,
+            challenges1_inv,
+            challenges3_inv,
+            challenges2_inv,
+            s_G,
+            s_H,
+            s_U,
+        ))
     }
 
     /// This method is for testing that proof generation works,
@@ -416,10 +440,11 @@ impl UnsafeMatrixFoldingProof {
         U: &[RistrettoPoint],
         n: usize,
         m: usize,
-        k: usize
+        k: usize,
     ) -> Result<(), ProofError> {
         // get verification scalars
-        let (x1, x3, x2, x1_inv, x3_inv, x2_inv, s_G, s_H, s_U) = self.verification_scalars(n, m, k, transcript)?;
+        let (x1, x3, x2, x1_inv, x3_inv, x2_inv, s_G, s_H, s_U) =
+            self.verification_scalars(n, m, k, transcript)?;
 
         // Debugging tests: confirms that all of the s-vectors were computed correctly.
         // Also guarantees that folded G, H, and U group elements were computed correctly
@@ -443,11 +468,9 @@ impl UnsafeMatrixFoldingProof {
         assert_eq!(H_EXPED, Hf_EXPED); */
 
         // Compute more verification exponents (here for L and R terms)
-        let neg_x = x1.iter()
-            .chain(x3.iter())
-            .chain(x2.iter())
-            .map(|xi| -xi);
-        let neg_x_inv = x1_inv.iter()
+        let neg_x = x1.iter().chain(x3.iter()).chain(x2.iter()).map(|xi| -xi);
+        let neg_x_inv = x1_inv
+            .iter()
             .chain(x3_inv.iter())
             .chain(x2_inv.iter())
             .map(|xi| -xi);
@@ -464,20 +487,14 @@ impl UnsafeMatrixFoldingProof {
         let Ls = self
             .L_vec1
             .iter()
-            .chain(self.L_vec3
-            .iter()
-            .chain(self.L_vec2
-            .iter()))
+            .chain(self.L_vec3.iter().chain(self.L_vec2.iter()))
             .map(|p| p.decompress().ok_or(ProofError::VerificationError))
             .collect::<Result<Vec<_>, _>>()?;
 
         let Rs = self
             .R_vec1
             .iter()
-            .chain(self.R_vec3
-            .iter()
-            .chain(self.R_vec2
-            .iter()))
+            .chain(self.R_vec3.iter().chain(self.R_vec2.iter()))
             .map(|p| p.decompress().ok_or(ProofError::VerificationError))
             .collect::<Result<Vec<_>, _>>()?;
 
@@ -492,7 +509,7 @@ impl UnsafeMatrixFoldingProof {
                 .chain(H.iter())
                 .chain(U.iter())
                 .chain(Ls.iter())
-                .chain(Rs.iter())
+                .chain(Rs.iter()),
         );
 
         // See if verification passes
@@ -508,12 +525,12 @@ impl UnsafeMatrixFoldingProof {
 // so we want to calculate a*b, but we are given the transpose of b as input
 // a should have n rows and b should have k columns (so b transpose should have k rows)
 pub fn mat_mult(a: &[Scalar], b: &[Scalar], n: usize, k: usize) -> Vec<Scalar> {
-    let mut c = Vec::with_capacity(n*k);
-    let m = a.len()/n;
+    let mut c = Vec::with_capacity(n * k);
+    let m = a.len() / n;
     // assert_eq!(m, b.len()/k);
     for a_row in a.chunks(m) {
         for b_col in b.chunks(m) {
-            c.push(inner_product(a_row,b_col));
+            c.push(inner_product(a_row, b_col));
         }
     }
     c
@@ -541,8 +558,6 @@ mod tests {
     use super::*;
     use std::time::Instant;
 
-
-
     fn mfp_test_helper_create(n: usize, m: usize, k: usize) {
         let mut rng = rand::thread_rng();
 
@@ -557,8 +572,8 @@ mod tests {
 
         // a and b are the matrices for which we want to prove c=ab
         // just generate random matrices every time
-        let a: Vec<_> = (0..(n*m)).map(|_| Scalar::random(&mut rng)).collect();
-        let b: Vec<_> = (0..(m*k)).map(|_| Scalar::random(&mut rng)).collect();
+        let a: Vec<_> = (0..(n * m)).map(|_| Scalar::random(&mut rng)).collect();
+        let b: Vec<_> = (0..(m * k)).map(|_| Scalar::random(&mut rng)).collect();
         let c = mat_mult(&a, &b, n, k);
 
         // debugging check: be sure matrix multiplication matches inner product if applicable
@@ -568,12 +583,8 @@ mod tests {
 
         // Compute commitment P
         let P = RistrettoPoint::vartime_multiscalar_mul(
-            a.iter()
-                .chain(b.iter())
-                .chain(c.iter()),
-            G.iter()
-                .chain(H.iter())
-                .chain(U.iter())
+            a.iter().chain(b.iter()).chain(c.iter()),
+            G.iter().chain(H.iter()).chain(U.iter()),
         );
 
         // generate proof
@@ -588,21 +599,13 @@ mod tests {
             c.clone(),
             n,
             m,
-            k
+            k,
         );
 
         // verify proof
         let mut verifier = Transcript::new(b"matrixfoldingtest");
-        assert!(proof.verify(
-            &mut verifier,
-            &P,
-            &G[..],
-            &H[..],
-            &U[..],
-            n,
-            m,
-            k
-        )
+        assert!(proof
+            .verify(&mut verifier, &P, &G[..], &H[..], &U[..], n, m, k)
             .is_ok());
     }
 
@@ -619,48 +622,51 @@ mod tests {
 
     #[test]
     fn u_make_mfp_3() {
-        mfp_test_helper_create(1,1,16);
+        mfp_test_helper_create(1, 1, 16);
     }
 
     #[test]
     fn u_make_mfp_4() {
-        mfp_test_helper_create(16,1,16);
+        mfp_test_helper_create(16, 1, 16);
     }
 
     #[test]
     fn u_make_mfp_5() {
-        mfp_test_helper_create(16,1,32);
+        mfp_test_helper_create(16, 1, 32);
     }
 
     #[test]
     fn u_make_mfp_6() {
-        mfp_test_helper_create(1,16,1);
+        mfp_test_helper_create(1, 16, 1);
     }
 
     #[test]
     fn u_make_mfp_7() {
-        mfp_test_helper_create(8,16,1);
+        mfp_test_helper_create(8, 16, 1);
     }
 
     #[test]
     fn u_make_mfp_8() {
-        mfp_test_helper_create(1,16,8);
+        mfp_test_helper_create(1, 16, 8);
     }
 
     #[test]
     fn u_make_mfp_9() {
-        mfp_test_helper_create(32,4,8);
+        mfp_test_helper_create(32, 4, 8);
     }
 
     fn mat_mult_test_helper(n: usize, m: usize, k: usize) {
         let mut rng = rand::thread_rng();
-        let a: Vec<_> = (0..(n*m)).map(|_| Scalar::random(&mut rng)).collect();
-        let b: Vec<_> = (0..(m*k)).map(|_| Scalar::random(&mut rng)).collect();
+        let a: Vec<_> = (0..(n * m)).map(|_| Scalar::random(&mut rng)).collect();
+        let b: Vec<_> = (0..(m * k)).map(|_| Scalar::random(&mut rng)).collect();
         let c = mat_mult(&a, &b, n, k);
-        
+
         for x in 0..n {
             for y in 0..k {
-                assert_eq!(inner_product(&a[x*m..(x+1)*m], &b[y*m..(y+1)*m]), c[k*x + y]);
+                assert_eq!(
+                    inner_product(&a[x * m..(x + 1) * m], &b[y * m..(y + 1) * m]),
+                    c[k * x + y]
+                );
             }
         }
     }
@@ -672,46 +678,56 @@ mod tests {
 
     #[test]
     fn mm_test_2() {
-        mat_mult_test_helper(16,1,1);
+        mat_mult_test_helper(16, 1, 1);
     }
 
     #[test]
     fn mm_test_3() {
-        mat_mult_test_helper(1,1,16);
+        mat_mult_test_helper(1, 1, 16);
     }
 
     #[test]
     fn mm_test_4() {
-        mat_mult_test_helper(16,1,16);
+        mat_mult_test_helper(16, 1, 16);
     }
 
     #[test]
     fn mm_test_5() {
-        mat_mult_test_helper(1,16,1);
+        mat_mult_test_helper(1, 16, 1);
     }
 
     #[test]
     fn mm_test_6() {
-        mat_mult_test_helper(16,32,1);
+        mat_mult_test_helper(16, 32, 1);
     }
 
     #[test]
     fn mm_test_7() {
-        mat_mult_test_helper(1,32,16);
+        mat_mult_test_helper(1, 32, 16);
     }
 
     #[test]
     fn mm_test_8() {
-        mat_mult_test_helper(64,32,16);
+        mat_mult_test_helper(64, 32, 16);
     }
 
     #[test]
     fn mm_test_9() {
-        mat_mult_test_helper(2,2,2);
+        mat_mult_test_helper(2, 2, 2);
     }
 
-
-    fn mfp_timing_setup(n: usize, m: usize, k: usize) -> (Vec<RistrettoPoint>, Vec<RistrettoPoint>, Vec<RistrettoPoint>, Vec<Scalar>, Vec<Scalar>, Vec<Scalar>) {
+    fn mfp_timing_setup(
+        n: usize,
+        m: usize,
+        k: usize,
+    ) -> (
+        Vec<RistrettoPoint>,
+        Vec<RistrettoPoint>,
+        Vec<RistrettoPoint>,
+        Vec<Scalar>,
+        Vec<Scalar>,
+        Vec<Scalar>,
+    ) {
         let mut rng = rand::thread_rng();
 
         // get group elements. See generators.rs file for how this works; I basically copied
@@ -725,8 +741,8 @@ mod tests {
 
         // a and b are the matrices for which we want to prove c=ab
         // just generate random matrices every time
-        let a: Vec<_> = (0..(n*m)).map(|_| Scalar::random(&mut rng)).collect();
-        let b: Vec<_> = (0..(m*k)).map(|_| Scalar::random(&mut rng)).collect();
+        let a: Vec<_> = (0..(n * m)).map(|_| Scalar::random(&mut rng)).collect();
+        let b: Vec<_> = (0..(m * k)).map(|_| Scalar::random(&mut rng)).collect();
         let c = mat_mult(&a, &b, n, k);
         (G, H, U, a, b, c)
     }
@@ -748,40 +764,31 @@ mod tests {
             c.clone(),
             n,
             m,
-            k
+            k,
         );
         let create_duration = create_start.elapsed();
 
         let P = RistrettoPoint::vartime_multiscalar_mul(
-            a.iter()
-                .chain(b.iter())
-                .chain(c.iter()),
-            G.iter()
-                .chain(H.iter())
-                .chain(U.iter())
+            a.iter().chain(b.iter()).chain(c.iter()),
+            G.iter().chain(H.iter()).chain(U.iter()),
         );
 
         let mut verifier = Transcript::new(b"matrixfoldingtest");
         let verify_start = Instant::now();
-        assert!(proof.verify(
-            &mut verifier,
-            &P,
-            &G[..],
-            &H[..],
-            &U[..],
-            n,
-            m,
-            k
-        )
+        assert!(proof
+            .verify(&mut verifier, &P, &G[..], &H[..], &U[..], n, m, k)
             .is_ok());
         let verify_duration = verify_start.elapsed();
 
-        println!("SIZE n={}, m={}, k={}. DURATION setup={}, create={}, verify={}", 
-                n, m, k, 
-                setup_duration.as_secs_f32(),
-                create_duration.as_secs_f32(),
-                verify_duration.as_secs_f32()
-                );
+        println!(
+            "SIZE n={}, m={}, k={}. DURATION setup={}, create={}, verify={}",
+            n,
+            m,
+            k,
+            setup_duration.as_secs_f32(),
+            create_duration.as_secs_f32(),
+            verify_duration.as_secs_f32()
+        );
     }
 
     #[test]
@@ -818,6 +825,4 @@ mod tests {
     fn mfp_timing_7() {
         mfp_timing_helper(128, 256, 512);
     }
-
 }
-

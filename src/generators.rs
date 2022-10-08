@@ -299,13 +299,12 @@ pub struct MatrixFoldingGens {
     /// Precomputed \\(\mathbf H\\) generators for each party.
     H_vec: Vec<RistrettoPoint>,
     U_vec: Vec<RistrettoPoint>,
-    g_0: Option<RistrettoPoint>
+    g_0: Option<RistrettoPoint>,
 }
-
 
 impl MatrixFoldingGens {
     /// Create a new "MatrixFoldingGens" object.
-    /// parameters give the size of the matrices for which the generators 
+    /// parameters give the size of the matrices for which the generators
     /// are needed. Specifically, G will be n x m, H will be m x k, and U will be n x k.
     /// g_0 is the group element to hold the blinding factors.
     pub fn new(new_n: usize, new_m: usize, new_k: usize) -> Self {
@@ -317,7 +316,7 @@ impl MatrixFoldingGens {
             G_vec: Vec::new(),
             H_vec: Vec::new(),
             U_vec: Vec::new(),
-            g_0
+            g_0,
         };
         gens.increase_capacity(new_n, new_m, new_k);
         gens
@@ -326,7 +325,6 @@ impl MatrixFoldingGens {
     /// Increases the generators' capacity to the amount specified.
     /// If less than or equal to the current capacity, does nothing.
     pub fn increase_capacity(&mut self, new_n: usize, new_m: usize, new_k: usize) {
-
         if self.n >= new_n && self.m >= new_m && self.k >= new_k {
             return;
         }
@@ -356,7 +354,7 @@ impl MatrixFoldingGens {
         self.k = new_k;
     }
 
-    /// Functions to return the 
+    /// Functions to return the
     pub(crate) fn G(&self) -> Vec<RistrettoPoint> {
         self.G_vec.clone()
     }
