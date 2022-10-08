@@ -57,9 +57,9 @@ impl TranscriptProtocol for Transcript {
 
     fn matrixfolding_domain_sep(&mut self, n: u64, m: u64, k: u64) {
         self.append_message(b"dom-sep", b"fp v1");
-        self.append_u64(b"n",n);
-        self.append_u64(b"m",m);
-        self.append_u64(b"k",k);
+        self.append_u64(b"n", n);
+        self.append_u64(b"m", m);
+        self.append_u64(b"k", k);
     }
 
     fn r1cs_domain_sep(&mut self) {

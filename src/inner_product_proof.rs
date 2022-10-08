@@ -84,10 +84,9 @@ impl InnerProductProof {
 
             let c_L = inner_product(&a_L, &b_R);
             let c_R = inner_product(&a_R, &b_L);
-            
 
             // some elliptic curve stuff? looks like computing L and R from paper:
-            // L takes g terms from n (midpoint) to 2n, whereas R takes first half 
+            // L takes g terms from n (midpoint) to 2n, whereas R takes first half
             // QUESTION: need to figure out how/what the a_L_i are / how they are treated (don't see them defined anywhere)
             let L = RistrettoPoint::vartime_multiscalar_mul(
                 a_L.iter()
@@ -116,7 +115,7 @@ impl InnerProductProof {
                 G_L.iter().chain(H_R.iter()).chain(iter::once(Q)),
             )
             .compress();
-            
+
             // add L and R to L_vec, R_vec (which seem to be vecs of all L/R terms generated across whole proof)
             L_vec.push(L);
             R_vec.push(R);
@@ -149,7 +148,7 @@ impl InnerProductProof {
             H = H_L;
         }
 
-        // all subsequent iterations besides first happen here (first happens above) 
+        // all subsequent iterations besides first happen here (first happens above)
         // (unless first is n=1, in which case both above and below blocks skipped)
         while n != 1 {
             // same as before; split the vectors into halves
@@ -217,11 +216,11 @@ impl InnerProductProof {
     /// Computes three vectors of verification scalars \\([u\_{i}^{2}]\\), \\([u\_{i}^{-2}]\\) and \\([s\_{i}]\\) for combined multiscalar multiplication
     /// in a parent protocol. See [inner product protocol notes](index.html#verification-equation) for details.
     /// The verifier must provide the input length \\(n\\) explicitly to avoid unbounded allocation within the inner product proof.
-    /// 
+    ///
     /// added note from Aram: the linked page above is actually useful: https://doc-internal.dalek.rs/bulletproofs/inner_product_proof/index.html
     /// note everything is written additively here, so products become sums and exponentiations become products
     /// this verification equation matches the equation at the top of page 17 in the paper; s is the same as in the paper, but the u terms here are x terms in the paper
-    /// 
+    ///
     /// this method doesn't look like  it actually does any verification; it just returns the scalars needed for the verifier to do the verificatoin themselves
     pub(crate) fn verification_scalars(
         &self,
@@ -241,7 +240,7 @@ impl InnerProductProof {
         transcript.innerproduct_domain_sep(n as u64);
 
         // 1. Recompute x_k,...,x_1 based on the proof transcript
-        // idk it looks like their notation is inconsistent, here they talk about x but I think they mean what they're calling u... 
+        // idk it looks like their notation is inconsistent, here they talk about x but I think they mean what they're calling u...
         // maybe got confused with the paper's notation ??
 
         let mut challenges = Vec::with_capacity(lg_n);
@@ -273,8 +272,8 @@ impl InnerProductProof {
         for i in 1..n {
             let lg_i = (32 - 1 - (i as u32).leading_zeros()) as usize;
             let k = 1 << lg_i; // bitwise shift for exp
-            // The challenges are stored in "creation order" as [u_k,...,u_1],
-            // so u_{lg(i)+1} = is indexed by (lg_n-1) - lg_i
+                               // The challenges are stored in "creation order" as [u_k,...,u_1],
+                               // so u_{lg(i)+1} = is indexed by (lg_n-1) - lg_i
             let u_lg_i_sq = challenges_sq[(lg_n - 1) - lg_i];
             s.push(s[i - k] * u_lg_i_sq);
         }
