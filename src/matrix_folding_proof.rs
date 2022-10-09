@@ -126,7 +126,7 @@ impl ZKMatrixFoldingProof {
         // first fold A and B with inner product approach
         // A must be coloumn-major so that splitting in half correctly splits the matrix down the middle
         while m != 1 {
-            m = m / 2;
+            m /= 2;
             let (a_l, a_r) = a.split_at_mut(m * n);
             let (b_t, b_b) = b.split_at_mut(m * k);
             let (G_l, G_r) = G.split_at_mut(m * n);
@@ -240,7 +240,7 @@ impl ZKMatrixFoldingProof {
         // Now, fold n (A)
         // A now holds a col vector, so can fold vertically easily
         while n != 1 {
-            n = n / 2;
+            n /= 2;
             let (a_t, a_b) = a.split_at_mut(n);
             let (c_t, c_b) = c.split_at_mut(n * k);
             let (G_t, G_b) = G.split_at_mut(n);
@@ -322,7 +322,7 @@ impl ZKMatrixFoldingProof {
 
         // now fold k/B
         while k != 1 {
-            k = k / 2;
+            k /= 2;
             let (b_l, b_r) = b.split_at_mut(k);
             let (c_l, c_r) = c.split_at_mut(k); // n == 1 by the time we get here
             let (H_l, H_r) = H.split_at_mut(k);
@@ -553,10 +553,10 @@ impl ZKMatrixFoldingProof {
             .zip(self.R_vec3_tau.iter())
             .map(|(((x, y), z), w)| (x, y, z, w));
         for (L_beta, R_beta, L_tau, R_tau) in iter3 {
-            transcript.validate_and_append_point(b"bL", &L_beta)?;
-            transcript.validate_and_append_point(b"bR", &R_beta)?;
-            transcript.validate_and_append_point(b"tL", &L_tau)?;
-            transcript.validate_and_append_point(b"tR", &R_tau)?;
+            transcript.validate_and_append_point(b"bL", L_beta)?;
+            transcript.validate_and_append_point(b"bR", R_beta)?;
+            transcript.validate_and_append_point(b"tL", L_tau)?;
+            transcript.validate_and_append_point(b"tR", R_tau)?;
             challenges3.push(transcript.challenge_scalar(b"z"));
         }
 
@@ -642,17 +642,22 @@ impl ZKMatrixFoldingProof {
     pub fn verify(
         &self,
         transcript: &mut Transcript,
-        P: &RistrettoPoint,
-        G: &[RistrettoPoint],
-        H: &[RistrettoPoint],
-        U: &[RistrettoPoint],
-        g_0: &RistrettoPoint,
-        n: usize,
-        m: usize,
-        k: usize,
+        pp: (&[RistrettoPoint],&[RistrettoPoint],&[RistrettoPoint], &RistrettoPoint),
+        statement: &RistrettoPoint,
+        dimensions: (usize, usize, usize),
     ) -> Result<(), ProofError> {
         //debug
         // println!("BEGIN computations");
+        let G = pp.0;
+        let H = pp.1;
+        let U = pp.2;
+        let g_0 = pp.3;
+
+        let P = statement;
+
+        let n = dimensions.0;
+        let m = dimensions.1;
+        let k = dimensions.2;
 
         let one = Scalar::one();
         let (x1, x2, x3, x1_inv, x2_inv, x3_inv, zk_mult_chall, s_G, s_H, s_U) =
@@ -937,8 +942,8 @@ mod tests {
         let mut prover = Transcript::new(b"matrixfoldingtest");
         let proof = ZKMatrixFoldingProof::create(
             &mut prover,
-            (G.clone(), H.clone(), U.clone(), g_0.clone()),
-            (a.clone(), b.clone(), r.clone()),
+            (G.clone(), H.clone(), U.clone(), g_0),
+            (a, b, r),
             n,
             m,
             k,
@@ -947,7 +952,7 @@ mod tests {
         // verify proof
         let mut verifier = Transcript::new(b"matrixfoldingtest");
         assert!(proof
-            .verify(&mut verifier, &P, &G[..], &H[..], &U[..], &g_0, n, m, k)
+            .verify(&mut verifier,(&G[..], &H[..], &U[..], &g_0), &P, (n, m, k))
             .is_ok());
     }
 
