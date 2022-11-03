@@ -1,0 +1,125 @@
+name: Rust
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+    - name: Build
+      run: cargo build --verbose
+    - name: Run tests
+      run: cargo test --verbose
+
+  format:
+    executor: rust-executor
+    steps:
+      - checkout
+      - run: cargo fmt --all -- --check
+
+  check-semantic-rules:
+    machine:
+      image: ubuntu-2204:2022.04.2
+    steps:
+      - checkout
+      - run: sudo apt-get install jq
+      - run:
+          name: Check if branch name is valid
+          command: ./ci/check_semantic_rules.sh branch 1>&2
+      - run:
+          name: Check if "PR title" or "last commit message to main" is valid
+          command: |
+            if [ "${CIRCLE_PULL_REQUEST##*/}" != "" ]
+            then
+              # only run the job if it's a pull request
+              ./ci/check_semantic_rules.sh pr 1>&2
+            else
+              # check last commit message on main branch
+              ./ci/check_semantic_rules.sh main 1>&2
+            fi
+
+  check-code:
+    executor: rust-executor
+    steps:
+      - checkout
+      - run: cargo check
+      - run: cargo check --benches
+      # - run: cargo check --examples
+
+  clippy:
+    executor: rust-executor
+    steps:
+      - checkout
+      - run: rustup component add clippy
+      - run: cargo clippy -- -D warnings
+      - run: cargo clippy --benches -- -D warnings
+      # - run: cargo clippy --tests -- -D warnings
+      # - run: cargo clippy --examples -- -D warnings
+  
+  doc:
+    executor: rust-executor
+    resource_class: small
+    steps:
+      - checkout
+      - run: RUSTDOCFLAGS="-Dwarnings" && cargo doc
+  
+  udeps:
+    executor: rust-executor
+    steps:
+      - checkout
+      - run: rustup default nightly
+      - run: cargo install cargo-udeps --locked
+      - run: cargo +nightly udeps --all-targets
+
+  release:
+    executor: rust-executor
+    steps:
+      - checkout
+      - run:
+          name: Install npm packages 
+          command: npm ci
+      - run:
+          name: Execute semantic-release
+          command: npx semantic-release
+
+workflows:
+  lint_test_and_release:
+    jobs:
+      - format
+
+      - check-semantic-rules
+
+      - check-code
+
+      - clippy
+      
+      - doc
+
+      - udeps
+
+      - test
+
+      - release:
+          requires:
+            - check-semantic-rules
+            - format
+            - check-code
+            - clippy
+            - doc
+            - udeps
+            - test
+
+          filters:
+            branches:
+              only:
+                - main
