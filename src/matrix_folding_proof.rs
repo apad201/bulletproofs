@@ -112,19 +112,8 @@ impl ZKMatrixFoldingProof {
         let mut L_vec3_tau = Vec::with_capacity(lg_k);
         let mut R_vec3_tau = Vec::with_capacity(lg_k);
 
-        // Debugging: store challenges explicitly so we can check to be sure challenges
-        // are recovered properly in verification.
-        // Obviously this will NOT be part of the actual protocol
-        /* let mut TESTchall = Vec::with_capacity(lg_n + lg_m + lg_k);
-        let mut P_vec = Vec::with_capacity(lg_m);
-        let c = tp_mat_mult(a, b, n, k);
-        let mut P_actual = RistrettoPoint::vartime_multiscalar_mul(
-            a.iter().chain(b.iter()).chain(c.iter()).chain(iter::once(&r)),
-            G.iter().chain(H.iter()).chain(U.iter()).chain(iter::once(&g_0))
-        ); */
-
         // first fold A and B with inner product approach
-        // A must be coloumn-major so that splitting in half correctly splits the matrix down the middle
+        // A must be column-major so that splitting in half correctly splits the matrix down the middle
         while m != 1 {
             m /= 2;
             let (a_l, a_r) = a.split_at_mut(m * n);
@@ -178,9 +167,6 @@ impl ZKMatrixFoldingProof {
             let x = transcript.challenge_scalar(b"x");
             let x_inv = x.invert();
 
-            //debug: store challenge so we can verify challenges are correctly computed in verification
-            // TESTchall.push(x);
-
             // update witnesses and public parameters for recursion
             for i in 0..(n * m) {
                 a_l[i] = x * a_l[i] + a_r[i];
@@ -197,45 +183,10 @@ impl ZKMatrixFoldingProof {
             b = b_t;
             G = G_l;
             H = H_t;
-
-            //debug: check value of P' computed by verifier using L, P, R, x, matches theoretical value computed w
-            // G, H, U, a, b, r.
-            /* let c = tp_mat_mult(a, b, n, k);
-            let P_expect = RistrettoPoint::vartime_multiscalar_mul(
-                a.iter().chain(b.iter()).chain(c.iter()).chain(iter::once(&r)),
-                G.iter().chain(H.iter()).chain(U.iter()).chain(iter::once(&g_0))
-            );
-            let L_g = L.decompress().unwrap();
-            let R_g = R.decompress().unwrap();
-            P_actual = RistrettoPoint::vartime_multiscalar_mul(
-                iter::once(&x).chain(iter::once(&x_inv)).chain(iter::once(&one)),
-                iter::once(&L_g).chain(iter::once(&R_g)).chain(iter::once(&P_actual)));
-            assert_eq!(P_actual, P_expect);
-            P_vec.push(P_actual); */
         }
 
-        // now for "mini-reduction" 1, to transform the commitments
-        let t = Scalar::random(&mut rng);
-        let mut q = r - t;
-        r = t;
-
-        let mut c_vec = tp_mat_mult(a, b, n, k);
-        let mut c = &mut c_vec[..];
-
-        let alpha = RistrettoPoint::vartime_multiscalar_mul(
-            a.iter().chain(c.iter()).chain(iter::once(&q)),
-            G.iter().chain(U.iter()).chain(iter::once(&g_0)),
-        )
-        .compress();
-
-        let beta = RistrettoPoint::vartime_multiscalar_mul(
-            b.iter().chain(iter::once(&r)),
-            H.iter().chain(iter::once(&g_0)),
-        )
-        .compress();
-
-        transcript.append_point(b"a", &alpha);
-        transcript.append_point(b"b", &beta);
+        let (alpha, beta, q, r,c) =
+            red_lambda1(&mut transcript, (&G, &H, &U, &g_0), (a, b, &r), (n, m, k));
 
         // Now, fold n (A)
         // A now holds a col vector, so can fold vertically easily
@@ -642,7 +593,12 @@ impl ZKMatrixFoldingProof {
     pub fn verify(
         &self,
         transcript: &mut Transcript,
-        pp: (&[RistrettoPoint],&[RistrettoPoint],&[RistrettoPoint], &RistrettoPoint),
+        pp: (
+            &[RistrettoPoint],
+            &[RistrettoPoint],
+            &[RistrettoPoint],
+            &RistrettoPoint,
+        ),
         statement: &RistrettoPoint,
         dimensions: (usize, usize, usize),
     ) -> Result<(), ProofError> {
@@ -845,6 +801,60 @@ impl ZKMatrixFoldingProof {
     }
 }
 
+//TODO: HERE!!!
+pub fn red_lambda1(
+    transcript: &mut Transcript,
+    pp: (
+        &[RistrettoPoint],
+        &[RistrettoPoint],
+        &[RistrettoPoint],
+        &RistrettoPoint,
+    ),
+    witness: (&mut [Scalar], &mut [Scalar], &Scalar),
+    dimensions: (usize, usize, usize),
+) -> (CompressedRistretto, CompressedRistretto, Scalar, Scalar) {
+    //TODO: make input
+    let mut rng = rand::thread_rng();
+
+    let n = dimensions.0;
+    let m = dimensions.1;
+    let k = dimensions.2;
+
+    let G = pp.0;
+    let H = pp.1;
+    let U = pp.2;
+    let g_0 = pp.3;
+
+    let a = witness.0;
+    let b = witness.1;
+    let r = witness.2;
+
+    // now for "mini-reduction" 1, to transform the commitments
+    let t = Scalar::random(&mut rng);
+    let mut q = r - t;
+    r = &t;
+
+    let mut c_vec = tp_mat_mult(a, b, n, k);
+    let mut c = &mut c_vec[..];
+
+    let alpha = RistrettoPoint::vartime_multiscalar_mul(
+        a.iter().chain(c.iter()).chain(iter::once(&q)),
+        G.iter().chain(U.iter()).chain(iter::once(g_0)),
+    )
+    .compress();
+
+    let beta = RistrettoPoint::vartime_multiscalar_mul(
+        b.iter().chain(iter::once(r)),
+        H.iter().chain(iter::once(g_0)),
+    )
+    .compress();
+
+    transcript.append_point(b"a", &alpha);
+    transcript.append_point(b"b", &beta);
+
+    (alpha, beta, q, *r, c)
+}
+
 /// Matrix multiplication
 /// This assumes a is column-major and b is row-major, as used in first reduction step.
 /// a should have n rows and b should have k columns
@@ -952,7 +962,7 @@ mod tests {
         // verify proof
         let mut verifier = Transcript::new(b"matrixfoldingtest");
         assert!(proof
-            .verify(&mut verifier,(&G[..], &H[..], &U[..], &g_0), &P, (n, m, k))
+            .verify(&mut verifier, (&G[..], &H[..], &U[..], &g_0), &P, (n, m, k))
             .is_ok());
     }
 
