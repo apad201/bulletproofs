@@ -29,54 +29,47 @@ pub struct ZKMatrixFoldingProof {
     pub(crate) sigma: CompressedRistretto,
     pub(crate) tau: CompressedRistretto,
     pub(crate) rho_vec: Vec<CompressedRistretto>,
-    pub(crate) z_vec: Vec<Scalar>, // These are for debugging purposes only, will be removed lated
-                                   /* pub(crate) TESTx: Vec<Scalar>,
-                                   pub(crate) TESTGf: RistrettoPoint,
-                                   pub(crate) TESTHf: RistrettoPoint,
-                                   pub(crate) TESTUf: RistrettoPoint */
+    pub(crate) z_vec: Vec<Scalar>,
 }
 
 impl ZKMatrixFoldingProof {
-    /// Create a matrix folding proof.
-    ///
-    /// The `verifier` is passed in as a parameter so that the
-    /// challenges depend on the *entire* transcript (including parent
-    /// protocols).
-    ///
-    /// The dimnsions of the matrices must all be powers of 2
+    // Create a matrix folding proof.
     pub fn create(
         transcript: &mut Transcript,
-        pp: (
+        public_parameters: (
             Vec<RistrettoPoint>,
             Vec<RistrettoPoint>,
             Vec<RistrettoPoint>,
             RistrettoPoint,
-        ),
-        witness: (Vec<Scalar>, Vec<Scalar>, Scalar),
-        //mut a_vec: Vec<Scalar>, // matrix A, stored column-major
-        // mut b_vec: Vec<Scalar>, // row-major
-        // mut r: Scalar,          // blinding exponent
-        mut n: usize,
-        mut m: usize,
-        mut k: usize,
+        ), // blinding group element
+        witness: (
+            Vec<Scalar>,
+            Vec<Scalar>, // row-major
+            Scalar,
+        ), // blinding exponent
+        dim: (usize, usize, usize),
     ) -> ZKMatrixFoldingProof {
         // Create slices G, H, a, b backed by their respective
         // vectors. This lets us reslice as we compress the lengths
         // of the vectors in the main loop below.
-        let mut G_vec = pp.0;
-        let mut H_vec = pp.1;
-        let mut U_vec = pp.2;
-        let g_0 = pp.3;
+        let mut dim_n = dim.0;
+        let mut dim_m = dim.1;
+        let mut dim_k = dim.2;
 
-        let mut a_vec = witness.0;
-        let mut b_vec = witness.1;
-        let mut r = witness.2;
+        let mut witness_a = witness.0;
+        let mut witness_b = witness.1;
+        let mut blinding_r = witness.2;
 
-        let mut G = &mut G_vec[..];
-        let mut H = &mut H_vec[..];
-        let mut U = &mut U_vec[..];
-        let mut a = &mut a_vec[..];
-        let mut b = &mut b_vec[..];
+        let mut public_G = public_parameters.0;
+        let mut public_H = public_parameters.1;
+        let mut public_U = public_parameters.2;
+        let g_0 = public_parameters.3;
+
+        let mut public_G = &mut public_G[..];
+        let mut public_H = &mut public_H[..];
+        let mut public_U = &mut public_U[..];
+        let mut witness_a = &mut witness_a[..];
+        let mut witness_b = &mut witness_b[..];
 
         let one = Scalar::one();
 
@@ -84,73 +77,76 @@ impl ZKMatrixFoldingProof {
         let mut rng = rand::thread_rng();
 
         // All of the input vectors must have the correct length
-        assert_eq!(G.len(), n * m);
-        assert_eq!(H.len(), m * k);
-        assert_eq!(U.len(), n * k);
-        assert_eq!(a.len(), n * m);
-        assert_eq!(b.len(), m * k);
+        assert_eq!(public_G.len(), dim_n * dim_m);
+        assert_eq!(public_H.len(), dim_m * dim_k);
+        assert_eq!(public_U.len(), dim_n * dim_k);
+        assert_eq!(witness_a.len(), dim_n * dim_m);
+        assert_eq!(witness_b.len(), dim_m * dim_k);
 
         // All of the dimensions of matrices must be a power of two.
-        assert!(n.is_power_of_two());
-        assert!(m.is_power_of_two());
-        assert!(k.is_power_of_two());
+        assert!(dim_n.is_power_of_two());
+        assert!(dim_m.is_power_of_two());
+        assert!(dim_k.is_power_of_two());
 
         // begin the transcript
-        transcript.matrixfolding_domain_sep(n as u64, m as u64, k as u64);
+        transcript.matrixfolding_domain_sep(dim_n as u64, dim_m as u64, dim_k as u64);
 
-        let lg_n = n.next_power_of_two().trailing_zeros() as usize;
-        let lg_m = m.next_power_of_two().trailing_zeros() as usize;
-        let lg_k = k.next_power_of_two().trailing_zeros() as usize;
+        let log_n = dim_n.next_power_of_two().trailing_zeros() as usize;
+        let log_m = dim_m.next_power_of_two().trailing_zeros() as usize;
+        let log_k = dim_k.next_power_of_two().trailing_zeros() as usize;
 
         // create vectors for L and R values
-        let mut L_vec1 = Vec::with_capacity(lg_m);
-        let mut R_vec1 = Vec::with_capacity(lg_m);
-        let mut L_vec2 = Vec::with_capacity(lg_n);
-        let mut R_vec2 = Vec::with_capacity(lg_n);
-        let mut L_vec3_beta = Vec::with_capacity(lg_k);
-        let mut R_vec3_beta = Vec::with_capacity(lg_k);
-        let mut L_vec3_tau = Vec::with_capacity(lg_k);
-        let mut R_vec3_tau = Vec::with_capacity(lg_k);
+        let mut L_vec1 = Vec::with_capacity(log_m);
+
+        let mut R_vec1 = Vec::with_capacity(log_m);
+        let mut L_vec2 = Vec::with_capacity(log_n);
+        let mut R_vec2 = Vec::with_capacity(log_n);
+        let mut L_vec3_beta = Vec::with_capacity(log_k);
+        let mut R_vec3_beta = Vec::with_capacity(log_k);
+        let mut L_vec3_tau = Vec::with_capacity(log_k);
+        let mut R_vec3_tau = Vec::with_capacity(log_k);
 
         // first fold A and B with inner product approach
-        // A must be column-major so that splitting in half correctly splits the matrix down the middle
-        while m != 1 {
-            m /= 2;
-            let (a_l, a_r) = a.split_at_mut(m * n);
-            let (b_t, b_b) = b.split_at_mut(m * k);
-            let (G_l, G_r) = G.split_at_mut(m * n);
-            let (H_t, H_b) = H.split_at_mut(m * k);
+        // A must be coloumn-major so that splitting in half correctly splits the matrix down the middle
+        while dim_m != 1 {
+            dim_m /= 2;
+            let (witness_a_left, witness_a_right) = witness_a.split_at_mut(dim_m * dim_n);
+            let (b_t, b_b) = witness_b.split_at_mut(dim_m * dim_k);
+            let (G_l, G_r) = public_G.split_at_mut(dim_m * dim_n);
+            let (H_t, H_b) = public_H.split_at_mut(dim_m * dim_k);
 
             // get cross terms for L and R
             // these are matrix multiplications :(
-            let c_l = tp_mat_mult(a_l, b_b, n, k);
-            let c_r = tp_mat_mult(a_r, b_t, n, k);
+            let c_l = tp_mat_mult(witness_a_left, b_b, dim_n, dim_k);
+            let c_r = tp_mat_mult(witness_a_right, b_t, dim_n, dim_k);
 
             // gemerate blinding factors for L and R
-            let r_l = Scalar::random(&mut rng);
-            let r_r = Scalar::random(&mut rng);
+            let blinding_r_left = Scalar::random(&mut rng);
+            let blinding_r_right = Scalar::random(&mut rng);
 
             // compute L and R
             let L = RistrettoPoint::vartime_multiscalar_mul(
-                a_l.iter()
+                witness_a_left
+                    .iter()
                     .chain(b_b.iter())
                     .chain(c_l.iter())
-                    .chain(iter::once(&r_l)),
+                    .chain(iter::once(&blinding_r_left)),
                 G_r.iter()
                     .chain(H_t.iter())
-                    .chain(U.iter())
+                    .chain(public_U.iter())
                     .chain(iter::once(&g_0)),
             )
             .compress();
 
             let R = RistrettoPoint::vartime_multiscalar_mul(
-                a_r.iter()
+                witness_a_right
+                    .iter()
                     .chain(b_t.iter())
                     .chain(c_r.iter())
-                    .chain(iter::once(&r_r)),
+                    .chain(iter::once(&blinding_r_right)),
                 G_l.iter()
                     .chain(H_b.iter())
-                    .chain(U.iter())
+                    .chain(public_U.iter())
                     .chain(iter::once(&g_0)),
             )
             .compress();
@@ -167,35 +163,51 @@ impl ZKMatrixFoldingProof {
             let x = transcript.challenge_scalar(b"x");
             let x_inv = x.invert();
 
-            // update witnesses and public parameters for recursion
-            for i in 0..(n * m) {
-                a_l[i] = x * a_l[i] + a_r[i];
+            for i in 0..(dim_n * dim_m) {
+                witness_a_left[i] = x * witness_a_left[i] + witness_a_right[i];
                 G_l[i] = RistrettoPoint::vartime_multiscalar_mul(&[x_inv, one], &[G_l[i], G_r[i]]);
             }
+            //Now, zip, map do this.
 
-            for i in 0..(m * k) {
+            for i in 0..(dim_m * dim_k) {
                 b_t[i] = x_inv * b_t[i] + b_b[i];
                 H_t[i] = RistrettoPoint::vartime_multiscalar_mul(&[x, one], &[H_t[i], H_b[i]]);
             }
 
-            r = (x * r_l) + r + (x_inv * r_r);
-            a = a_l;
-            b = b_t;
-            G = G_l;
-            H = H_t;
+            blinding_r = (x * blinding_r_left) + blinding_r + (x_inv * blinding_r_right);
+            witness_a = witness_a_left;
+            witness_b = b_t;
+            public_G = G_l;
+            public_H = H_t;
         }
 
-        let (alpha, beta, q, r,c) =
-            red_lambda1(&mut transcript, (&G, &H, &U, &g_0), (a, b, &r), (n, m, k));
+        // now for "mini-reduction" 1, to transform the commitments
+        //TODO current
+        //CURRENT1
+
+        let mut c_vec = tp_mat_mult(witness_a, witness_b, dim_n, dim_k);
+        let mut c = &mut c_vec[..];
+
+        //let mut q: Scalar;
+        let (alpha, beta, blinding_r, q) = reduction_lambda_1(
+            (public_G, public_H, public_U, g_0),
+            (witness_a, witness_b, c, blinding_r),
+        );
+
+        let mut q = q; //TODO: stupid line
+        let mut blinding_r = blinding_r;
+
+        transcript.append_point(b"a", &alpha);
+        transcript.append_point(b"b", &beta);
 
         // Now, fold n (A)
         // A now holds a col vector, so can fold vertically easily
-        while n != 1 {
-            n /= 2;
-            let (a_t, a_b) = a.split_at_mut(n);
-            let (c_t, c_b) = c.split_at_mut(n * k);
-            let (G_t, G_b) = G.split_at_mut(n);
-            let (U_t, U_b) = U.split_at_mut(n * k);
+        while dim_n != 1 {
+            dim_n /= 2;
+            let (a_t, a_b) = witness_a.split_at_mut(dim_n);
+            let (c_t, c_b) = c.split_at_mut(dim_n * dim_k);
+            let (G_t, G_b) = public_G.split_at_mut(dim_n);
+            let (U_t, U_b) = public_U.split_at_mut(dim_n * dim_k);
 
             // gemerate blinding factors for L and R
             let q_l = Scalar::random(&mut rng);
@@ -226,17 +238,14 @@ impl ZKMatrixFoldingProof {
             let y = transcript.challenge_scalar(b"y");
             let y_inv = y.invert();
 
-            // debug
-            // TESTchall.push(y);
-
             // compute new a, G
-            for i in 0..n {
+            for i in 0..dim_n {
                 a_t[i] = y * a_t[i] + a_b[i];
                 G_t[i] = RistrettoPoint::vartime_multiscalar_mul(&[y_inv, one], &[G_t[i], G_b[i]]);
             }
 
             // compute new c, U
-            for i in 0..(n * k) {
+            for i in 0..(dim_n * dim_k) {
                 c_t[i] = y * c_t[i] + c_b[i];
                 U_t[i] = RistrettoPoint::vartime_multiscalar_mul(&[y_inv, one], &[U_t[i], U_b[i]]);
             }
@@ -245,55 +254,47 @@ impl ZKMatrixFoldingProof {
             q = (y * q_l) + q + (y_inv * q_r);
 
             // update a, c, G, U
-            a = a_t;
+            witness_a = a_t;
             c = c_t;
-            G = G_t;
-            U = U_t;
+            public_G = G_t;
+            public_U = U_t;
         }
 
+        //CURRENT2
         // mini-reduction 2: transform commitments again
-        let t = Scalar::random(&mut rng);
-        q -= t;
-        let mut s = t;
 
-        let sigma = RistrettoPoint::vartime_multiscalar_mul(
-            a.iter().chain(iter::once(&q)),
-            G.iter().chain(iter::once(&g_0)),
-        )
-        .compress();
-
-        let tau = RistrettoPoint::vartime_multiscalar_mul(
-            c.iter().chain(iter::once(&s)),
-            U.iter().chain(iter::once(&g_0)),
-        )
-        .compress();
-
+        let (sigma, tau, q, s) = reduction_lambda_2((public_G, public_U, g_0), (witness_a, c, q));
         transcript.append_point(b"s", &sigma);
         transcript.append_point(b"t", &tau);
 
+        //TODO: stupid lines
+        let q = q;
+        let mut s = s;
+        //CURRENT2
+
         // now fold k/B
-        while k != 1 {
-            k /= 2;
-            let (b_l, b_r) = b.split_at_mut(k);
-            let (c_l, c_r) = c.split_at_mut(k); // n == 1 by the time we get here
-            let (H_l, H_r) = H.split_at_mut(k);
-            let (U_l, U_r) = U.split_at_mut(k);
+        while dim_k != 1 {
+            dim_k /= 2;
+            let (b_l, b_r) = witness_b.split_at_mut(dim_k);
+            let (c_l, c_r) = c.split_at_mut(dim_k); // n == 1 by the time we get here
+            let (H_l, H_r) = public_H.split_at_mut(dim_k);
+            let (U_l, U_r) = public_U.split_at_mut(dim_k);
 
             // blinding
-            let r_l = Scalar::random(&mut rng);
-            let r_r = Scalar::random(&mut rng);
+            let blinding_r_left = Scalar::random(&mut rng);
+            let blinding_r_right = Scalar::random(&mut rng);
             let s_l = Scalar::random(&mut rng);
             let s_r = Scalar::random(&mut rng);
 
             // commitments: note we have 4 here, since we need 2 for beta and 2 for tau
             let L_beta = RistrettoPoint::vartime_multiscalar_mul(
-                b_l.iter().chain(iter::once(&r_l)),
+                b_l.iter().chain(iter::once(&blinding_r_left)),
                 H_r.iter().chain(iter::once(&g_0)),
             )
             .compress();
 
             let R_beta = RistrettoPoint::vartime_multiscalar_mul(
-                b_r.iter().chain(iter::once(&r_r)),
+                b_r.iter().chain(iter::once(&blinding_r_right)),
                 H_l.iter().chain(iter::once(&g_0)),
             )
             .compress();
@@ -330,26 +331,26 @@ impl ZKMatrixFoldingProof {
             // TESTchall.push(z);
 
             // compute new b, H
-            for i in 0..k {
+            for i in 0..dim_k {
                 b_l[i] = z * b_l[i] + b_r[i];
                 H_l[i] = RistrettoPoint::vartime_multiscalar_mul(&[z_inv, one], &[H_l[i], H_r[i]]);
             }
 
             // compute new c, U
-            for i in 0..k {
+            for i in 0..dim_k {
                 // n == 1
                 c_l[i] = z * c_l[i] + c_r[i];
                 U_l[i] = RistrettoPoint::vartime_multiscalar_mul(&[z_inv, one], &[U_l[i], U_r[i]]);
             }
             // compute + update blindings
-            r = (z * r_l) + r + (z_inv * r_r);
+            blinding_r = (z * blinding_r_left) + blinding_r + (z_inv * blinding_r_right);
             s = (z * s_l) + s + (z_inv * s_r);
 
             // update values
-            b = b_l;
+            witness_b = b_l;
             c = c_l;
-            H = H_l;
-            U = U_l;
+            public_H = H_l;
+            public_U = U_l;
         }
 
         // final ZK scalar mult step
@@ -358,22 +359,22 @@ impl ZKMatrixFoldingProof {
         let t: Vec<_> = (0..5).map(|_| Scalar::random(&mut rng)).collect();
         let rho_0 = RistrettoPoint::vartime_multiscalar_mul(
             iter::once(&t[0]).chain(iter::once(&t[1])),
-            G.iter().chain(iter::once(&g_0)),
+            public_G.iter().chain(iter::once(&g_0)),
         )
         .compress();
         let rho_1 = RistrettoPoint::vartime_multiscalar_mul(
             iter::once(&t[2]).chain(iter::once(&t[3])),
-            H.iter().chain(iter::once(&g_0)),
+            public_H.iter().chain(iter::once(&g_0)),
         )
         .compress();
         let rho_2 = RistrettoPoint::vartime_multiscalar_mul(
             iter::once(&(t[0] * t[2])).chain(iter::once(&t[4])),
-            U.iter().chain(iter::once(&g_0)),
+            public_U.iter().chain(iter::once(&g_0)),
         )
         .compress();
         let rho_3 = RistrettoPoint::vartime_multiscalar_mul(
-            iter::once(&(t[0] * b[0] + t[2] * a[0])),
-            U.iter(),
+            iter::once(&(t[0] * witness_b[0] + t[2] * witness_a[0])),
+            public_U.iter(),
         )
         .compress();
 
@@ -388,10 +389,10 @@ impl ZKMatrixFoldingProof {
         let x = transcript.challenge_scalar(b"x");
 
         // compute responses
-        let z_0 = t[0] + (a[0] * x);
+        let z_0 = t[0] + (witness_a[0] * x);
         let z_1 = t[1] + (q * x);
-        let z_2 = t[2] + (b[0] * x);
-        let z_3 = t[3] + (r * x);
+        let z_2 = t[2] + (witness_b[0] * x);
+        let z_3 = t[3] + (blinding_r * x);
         let z_4 = t[4] + (s * x * x);
 
         let z_vec = vec![z_0, z_1, z_2, z_3, z_4];
@@ -443,24 +444,24 @@ impl ZKMatrixFoldingProof {
         ),
         ProofError,
     > {
-        let lg_m = self.L_vec1.len();
-        let lg_n = self.L_vec2.len();
-        let lg_k = self.L_vec3_beta.len();
+        let log_m = self.L_vec1.len();
+        let log_n = self.L_vec2.len();
+        let log_k = self.L_vec3_beta.len();
 
-        if lg_n >= 32 || lg_m >= 32 || lg_k >= 32 {
+        if log_n >= 32 || log_m >= 32 || log_k >= 32 {
             // prevent overflow in bitshifts later on
             return Err(ProofError::VerificationError);
         }
-        if (lg_n != 0 && n != (1 << lg_n))
-            || (lg_m != 0 && m != (1 << lg_m))
-            || (lg_k != 0 && k != (1 << lg_k))
+        if (log_n != 0 && n != (1 << log_n))
+            || (log_m != 0 && m != (1 << log_m))
+            || (log_k != 0 && k != (1 << log_k))
         {
             // not powers of 2
             return Err(ProofError::VerificationError);
         }
-        if self.L_vec3_tau.len() != lg_k
-            || self.R_vec3_beta.len() != lg_k
-            || self.R_vec3_tau.len() != lg_k
+        if self.L_vec3_tau.len() != log_k
+            || self.R_vec3_beta.len() != log_k
+            || self.R_vec3_tau.len() != log_k
         {
             // malformed vectors
             return Err(ProofError::VerificationError);
@@ -474,9 +475,9 @@ impl ZKMatrixFoldingProof {
         // 1. Recompute challenges based on the proof transcript
         // add everything to transcript and get challenges, just like the Prover does
 
-        let mut challenges1 = Vec::with_capacity(lg_m);
-        let mut challenges2 = Vec::with_capacity(lg_n);
-        let mut challenges3 = Vec::with_capacity(lg_k);
+        let mut challenges1 = Vec::with_capacity(log_m);
+        let mut challenges2 = Vec::with_capacity(log_n);
+        let mut challenges3 = Vec::with_capacity(log_k);
 
         for (L, R) in self.L_vec1.iter().zip(self.R_vec1.iter()) {
             transcript.validate_and_append_point(b"L", L)?;
@@ -505,7 +506,7 @@ impl ZKMatrixFoldingProof {
             .map(|(((x, y), z), w)| (x, y, z, w));
         for (L_beta, R_beta, L_tau, R_tau) in iter3 {
             transcript.validate_and_append_point(b"bL", L_beta)?;
-            transcript.validate_and_append_point(b"bR", R_beta)?;
+            transcript.validate_and_append_point(b"bR", &R_beta)?;
             transcript.validate_and_append_point(b"tL", L_tau)?;
             transcript.validate_and_append_point(b"tR", R_tau)?;
             challenges3.push(transcript.challenge_scalar(b"z"));
@@ -552,26 +553,26 @@ impl ZKMatrixFoldingProof {
 
         s_G.push(s_G0);
         for i in 1..(n * m) {
-            let lg_i = (32 - 1 - (i as u32).leading_zeros()) as usize;
-            let b = 1 << lg_i;
-            let x_lg_i = challengesG[(lg_n + lg_m - 1) - lg_i];
-            s_G.push(s_G[i - b] * x_lg_i);
+            let log_i = (32 - 1 - (i as u32).leading_zeros()) as usize;
+            let b = 1 << log_i;
+            let x_log_i = challengesG[(log_n + log_m - 1) - log_i];
+            s_G.push(s_G[i - b] * x_log_i);
         }
 
         s_H.push(s_H0);
         for i in 1..(m * k) {
-            let lg_i = (32 - 1 - (i as u32).leading_zeros()) as usize;
-            let b = 1 << lg_i;
-            let x_lg_i = challengesH[(lg_m + lg_k - 1) - lg_i];
-            s_H.push(s_H[i - b] * x_lg_i);
+            let log_i = (32 - 1 - (i as u32).leading_zeros()) as usize;
+            let b = 1 << log_i;
+            let x_log_i = challengesH[(log_m + log_k - 1) - log_i];
+            s_H.push(s_H[i - b] * x_log_i);
         }
 
         s_U.push(s_U0);
         for i in 1..(n * k) {
-            let lg_i = (32 - 1 - (i as u32).leading_zeros()) as usize;
-            let b = 1 << lg_i;
-            let x_lg_i = challengesU[(lg_n + lg_k - 1) - lg_i];
-            s_U.push(s_U[i - b] * x_lg_i);
+            let log_i = (32 - 1 - (i as u32).leading_zeros()) as usize;
+            let b = 1 << log_i;
+            let x_log_i = challengesU[(log_n + log_k - 1) - log_i];
+            s_U.push(s_U[i - b] * x_log_i);
         }
 
         Ok((
@@ -593,27 +594,17 @@ impl ZKMatrixFoldingProof {
     pub fn verify(
         &self,
         transcript: &mut Transcript,
-        pp: (
-            &[RistrettoPoint],
-            &[RistrettoPoint],
-            &[RistrettoPoint],
-            &RistrettoPoint,
-        ),
-        statement: &RistrettoPoint,
-        dimensions: (usize, usize, usize),
+        P: &RistrettoPoint,
+        G: &[RistrettoPoint],
+        H: &[RistrettoPoint],
+        U: &[RistrettoPoint],
+        g_0: &RistrettoPoint,
+        n: usize,
+        m: usize,
+        k: usize,
     ) -> Result<(), ProofError> {
         //debug
         // println!("BEGIN computations");
-        let G = pp.0;
-        let H = pp.1;
-        let U = pp.2;
-        let g_0 = pp.3;
-
-        let P = statement;
-
-        let n = dimensions.0;
-        let m = dimensions.1;
-        let k = dimensions.2;
 
         let one = Scalar::one();
         let (x1, x2, x3, x1_inv, x2_inv, x3_inv, zk_mult_chall, s_G, s_H, s_U) =
@@ -667,21 +658,21 @@ impl ZKMatrixFoldingProof {
             .ok_or(ProofError::VerificationError)?;
         let tau = self.tau.decompress().ok_or(ProofError::VerificationError)?;
         // need to compute value of alpha after all runs of reduction Phi2 (once n == 1)
-        let alpha_Ls = self
+        let alphwitness_a_lefts = self
             .L_vec2
             .iter()
             .map(|p| p.decompress().ok_or(ProofError::VerificationError))
             .collect::<Result<Vec<_>, _>>()?;
-        let alpha_Rs = self
+        let alphwitness_a_rights = self
             .R_vec2
             .iter()
             .map(|p| p.decompress().ok_or(ProofError::VerificationError))
             .collect::<Result<Vec<_>, _>>()?;
         let alpha_final = RistrettoPoint::vartime_multiscalar_mul(
             x2.iter().chain(x2_inv.iter()).chain(iter::once(&one)),
-            alpha_Ls
+            alphwitness_a_lefts
                 .iter()
-                .chain(alpha_Rs.iter())
+                .chain(alphwitness_a_rights.iter())
                 .chain(iter::once(&alpha)),
         );
 
@@ -695,19 +686,19 @@ impl ZKMatrixFoldingProof {
         // check for mini-reduction 3
         // this one is different: still need the final values of beta and tau
         // but also need to get the other values used in the checks for mini-reduction 3
-        let beta_Ls = self
+        let betwitness_a_lefts = self
             .L_vec3_beta
             .iter()
             .map(|p| p.decompress().ok_or(ProofError::VerificationError))
             .collect::<Result<Vec<_>, _>>()?;
-        let beta_Rs = self
+        let betwitness_a_rights = self
             .R_vec3_beta
             .iter()
             .map(|p| p.decompress().ok_or(ProofError::VerificationError))
             .collect::<Result<Vec<_>, _>>()?;
-        let beta_points = beta_Ls
+        let beta_points = betwitness_a_lefts
             .iter()
-            .chain(beta_Rs.iter())
+            .chain(betwitness_a_rights.iter())
             .chain(iter::once(&beta));
 
         let tau_Ls = self
@@ -801,60 +792,6 @@ impl ZKMatrixFoldingProof {
     }
 }
 
-//TODO: HERE!!!
-pub fn red_lambda1(
-    transcript: &mut Transcript,
-    pp: (
-        &[RistrettoPoint],
-        &[RistrettoPoint],
-        &[RistrettoPoint],
-        &RistrettoPoint,
-    ),
-    witness: (&mut [Scalar], &mut [Scalar], &Scalar),
-    dimensions: (usize, usize, usize),
-) -> (CompressedRistretto, CompressedRistretto, Scalar, Scalar) {
-    //TODO: make input
-    let mut rng = rand::thread_rng();
-
-    let n = dimensions.0;
-    let m = dimensions.1;
-    let k = dimensions.2;
-
-    let G = pp.0;
-    let H = pp.1;
-    let U = pp.2;
-    let g_0 = pp.3;
-
-    let a = witness.0;
-    let b = witness.1;
-    let r = witness.2;
-
-    // now for "mini-reduction" 1, to transform the commitments
-    let t = Scalar::random(&mut rng);
-    let mut q = r - t;
-    r = &t;
-
-    let mut c_vec = tp_mat_mult(a, b, n, k);
-    let mut c = &mut c_vec[..];
-
-    let alpha = RistrettoPoint::vartime_multiscalar_mul(
-        a.iter().chain(c.iter()).chain(iter::once(&q)),
-        G.iter().chain(U.iter()).chain(iter::once(g_0)),
-    )
-    .compress();
-
-    let beta = RistrettoPoint::vartime_multiscalar_mul(
-        b.iter().chain(iter::once(r)),
-        H.iter().chain(iter::once(g_0)),
-    )
-    .compress();
-
-    transcript.append_point(b"a", &alpha);
-    transcript.append_point(b"b", &beta);
-
-    (alpha, beta, q, *r, c)
-}
-
 /// Matrix multiplication
 /// This assumes a is column-major and b is row-major, as used in first reduction step.
 /// a should have n rows and b should have k columns
@@ -863,10 +800,10 @@ pub fn tp_mat_mult(a: &[Scalar], b: &[Scalar], n: usize, k: usize) -> Vec<Scalar
 
     for i in 0..n {
         for j in 0..k {
-            let a_row = a.iter().skip(i).step_by(n);
+            let witness_a_rightow = a.iter().skip(i).step_by(n);
             let b_col = b.iter().skip(j).step_by(k);
             let mut val = Scalar::zero();
-            for (a_val, b_val) in a_row.zip(b_col) {
+            for (a_val, b_val) in witness_a_rightow.zip(b_col) {
                 val += a_val * b_val;
             }
             c.push(val);
@@ -889,6 +826,79 @@ pub fn inner_product(a: &[Scalar], b: &[Scalar]) -> Scalar {
         out += a[i] * b[i];
     }
     out
+}
+
+//TODO: CURRENT
+pub fn reduction_lambda_1(
+    public: (
+        &mut [RistrettoPoint],
+        &mut [RistrettoPoint],
+        &mut [RistrettoPoint],
+        RistrettoPoint,
+    ),
+    witness: (&mut [Scalar], &mut [Scalar], &mut [Scalar], Scalar),
+) -> (CompressedRistretto, CompressedRistretto, Scalar, Scalar) {
+    let public_G = public.0;
+    let public_H = public.1;
+    let public_U = public.2;
+    let g_0 = public.3;
+    let witness_a = witness.0;
+    let witness_b = witness.1;
+    let c = witness.2;
+    let blinding_r = witness.3;
+
+    let mut rng = rand::thread_rng();
+
+    let t = Scalar::random(&mut rng);
+    let q = blinding_r - t;
+    let blinding_r = t;
+
+    let alpha = RistrettoPoint::vartime_multiscalar_mul(
+        witness_a.iter().chain(c.iter()).chain(iter::once(&q)),
+        public_G
+            .iter()
+            .chain(public_U.iter())
+            .chain(iter::once(&g_0)),
+    )
+    .compress();
+
+    let beta = RistrettoPoint::vartime_multiscalar_mul(
+        witness_b.iter().chain(iter::once(&blinding_r)),
+        public_H.iter().chain(iter::once(&g_0)),
+    )
+    .compress();
+
+    (alpha, beta, blinding_r, q)
+}
+
+pub fn reduction_lambda_2(
+    public: (&mut [RistrettoPoint], &mut [RistrettoPoint], RistrettoPoint),
+    witness: (&mut [Scalar], &mut [Scalar], Scalar),
+) -> (CompressedRistretto, CompressedRistretto, Scalar, Scalar) {
+    let public_G = public.0;
+    let public_U = public.1;
+    let g_0 = public.2;
+    let witness_a = witness.0;
+    let c = witness.1;
+    let q = witness.2;
+
+    let mut rng = rand::thread_rng();
+    let s = Scalar::random(&mut rng);
+    let t = q - s; //TODO:  TEMP
+
+    let sigma = RistrettoPoint::vartime_multiscalar_mul(
+        witness_a.iter().chain(iter::once(&t)),
+        public_G.iter().chain(iter::once(&g_0)),
+    )
+    .compress();
+
+    let tau = RistrettoPoint::vartime_multiscalar_mul(
+        c.iter().chain(iter::once(&s)),
+        public_U.iter().chain(iter::once(&g_0)),
+    )
+    .compress();
+
+    (sigma, tau, q, s)
 }
 
 /// Get generators: for use in benchmarks and other cases where external code
@@ -952,17 +962,15 @@ mod tests {
         let mut prover = Transcript::new(b"matrixfoldingtest");
         let proof = ZKMatrixFoldingProof::create(
             &mut prover,
-            (G.clone(), H.clone(), U.clone(), g_0),
-            (a, b, r),
-            n,
-            m,
-            k,
+            (G.clone(), H.clone(), U.clone(), g_0.clone()),
+            (a.clone(), b.clone(), r.clone()),
+            (n, m, k),
         );
 
         // verify proof
         let mut verifier = Transcript::new(b"matrixfoldingtest");
         assert!(proof
-            .verify(&mut verifier, (&G[..], &H[..], &U[..], &g_0), &P, (n, m, k))
+            .verify(&mut verifier, &P, &G[..], &H[..], &U[..], &g_0, n, m, k)
             .is_ok());
     }
 
