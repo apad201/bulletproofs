@@ -31,16 +31,9 @@ fn prove_square_folding(crit: &mut Criterion) {
                         let mut prover = Transcript::new(b"matrixfoldingbench");
                         let proof = ZKMatrixFoldingProof::create(
                             &mut prover,
-                            G.clone(),
-                            H.clone(),
-                            U.clone(),
-                            g_0.clone(),
-                            a.clone(),
-                            b.clone(),
-                            r.clone(),
-                            n,
-                            m,
-                            k,
+                            (G.clone(), H.clone(), U.clone(), g_0.clone()),
+                            (a.clone(), b.clone(), r.clone()),
+                            (n, m, k),
                         );
                         proof
                     });
@@ -69,16 +62,9 @@ fn verify_square_folding(crit: &mut Criterion) {
                     let mut prover = Transcript::new(b"matrixfoldingbench");
                     let proof = ZKMatrixFoldingProof::create(
                         &mut prover,
-                        G.clone(),
-                        H.clone(),
-                        U.clone(),
-                        g_0.clone(),
-                        a.clone(),
-                        b.clone(),
-                        r.clone(),
-                        n,
-                        m,
-                        k,
+                        (G.clone(), H.clone(), U.clone(), g_0.clone()),
+                        (a.clone(), b.clone(), r.clone()),
+                        (n, m, k),
                     );
                     let P = RistrettoPoint::vartime_multiscalar_mul(
                         a.iter()

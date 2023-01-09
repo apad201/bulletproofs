@@ -97,7 +97,6 @@ impl ZKMatrixFoldingProof {
 
         // create vectors for L and R values
         let mut L_vec1 = Vec::with_capacity(log_m);
-
         let mut R_vec1 = Vec::with_capacity(log_m);
         let mut L_vec2 = Vec::with_capacity(log_n);
         let mut R_vec2 = Vec::with_capacity(log_n);
@@ -111,14 +110,15 @@ impl ZKMatrixFoldingProof {
         while dim_m != 1 {
             dim_m /= 2;
             let (witness_a_left, witness_a_right) = witness_a.split_at_mut(dim_m * dim_n);
-            let (b_t, b_b) = witness_b.split_at_mut(dim_m * dim_k);
+            let (witness_b_top, witness_b_bottom) = witness_b.split_at_mut(dim_m * dim_k);
             let (G_l, G_r) = public_G.split_at_mut(dim_m * dim_n);
             let (H_t, H_b) = public_H.split_at_mut(dim_m * dim_k);
 
             // get cross terms for L and R
             // these are matrix multiplications :(
-            let c_l = tp_mat_mult(witness_a_left, b_b, dim_n, dim_k);
-            let c_r = tp_mat_mult(witness_a_right, b_t, dim_n, dim_k);
+            //Can we do the updates better? TODO
+            let c_l = tp_mat_mult(witness_a_left, witness_b_bottom, dim_n, dim_k);
+            let c_r = tp_mat_mult(witness_a_right, witness_b_top, dim_n, dim_k);
 
             // gemerate blinding factors for L and R
             let blinding_r_left = Scalar::random(&mut rng);
@@ -128,7 +128,7 @@ impl ZKMatrixFoldingProof {
             let L = RistrettoPoint::vartime_multiscalar_mul(
                 witness_a_left
                     .iter()
-                    .chain(b_b.iter())
+                    .chain(witness_b_bottom.iter())
                     .chain(c_l.iter())
                     .chain(iter::once(&blinding_r_left)),
                 G_r.iter()
@@ -141,7 +141,7 @@ impl ZKMatrixFoldingProof {
             let R = RistrettoPoint::vartime_multiscalar_mul(
                 witness_a_right
                     .iter()
-                    .chain(b_t.iter())
+                    .chain(witness_b_top.iter())
                     .chain(c_r.iter())
                     .chain(iter::once(&blinding_r_right)),
                 G_l.iter()
@@ -162,6 +162,7 @@ impl ZKMatrixFoldingProof {
             // get challenge and its inverse
             let x = transcript.challenge_scalar(b"x");
             let x_inv = x.invert();
+            blinding_r = (x * blinding_r_left) + blinding_r + (x_inv * blinding_r_right);
 
             for i in 0..(dim_n * dim_m) {
                 witness_a_left[i] = x * witness_a_left[i] + witness_a_right[i];
@@ -170,13 +171,12 @@ impl ZKMatrixFoldingProof {
             //Now, zip, map do this.
 
             for i in 0..(dim_m * dim_k) {
-                b_t[i] = x_inv * b_t[i] + b_b[i];
+                witness_b_top[i] = x_inv * witness_b_top[i] + witness_b_bottom[i];
                 H_t[i] = RistrettoPoint::vartime_multiscalar_mul(&[x, one], &[H_t[i], H_b[i]]);
             }
 
-            blinding_r = (x * blinding_r_left) + blinding_r + (x_inv * blinding_r_right);
             witness_a = witness_a_left;
-            witness_b = b_t;
+            witness_b = witness_b_top;
             public_G = G_l;
             public_H = H_t;
         }
